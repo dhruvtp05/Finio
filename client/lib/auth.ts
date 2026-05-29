@@ -13,8 +13,9 @@ export const authOptions: NextAuthOptions = {
   ],
   session: { strategy: "jwt" },
   callbacks: {
-    async jwt({ token, profile }) {
-      if (profile?.email) token.email = profile.email;
+    async jwt({ token, user, profile }) {
+      if (user?.email) token.email = user.email;
+      else if (profile?.email) token.email = profile.email;
       return token;
     },
     async session({ session, token }) {
