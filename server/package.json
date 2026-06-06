@@ -13,6 +13,8 @@
     "plaid": "^20",
     "cors": "^2",
     "dotenv": "^16",
+    "express-rate-limit": "^7",
+    "helmet": "^8",
     "jose": "^5"
   },
   "devDependencies": {

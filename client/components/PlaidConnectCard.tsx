@@ -3,6 +3,7 @@
 import { useState } from "react";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
 import api from "@/lib/api";
+import { toast } from "sonner";
 
 export default function PlaidConnectCard({
   connected,
@@ -12,51 +13,71 @@ export default function PlaidConnectCard({
   onUpdated: () => void;
 }) {
   const [syncing, setSyncing] = useState(false);
-  const [message, setMessage] = useState("");
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const handleSync = async () => {
     setSyncing(true);
-    setMessage("");
     try {
       const res = await api.post("/api/plaid/sync");
       if (res.data.synced > 0) {
-        setMessage(`Synced ${res.data.synced} transactions.`);
+        toast.success(`Synced ${res.data.synced} transactions`);
         onUpdated();
       } else {
-        setMessage("No new transactions yet. Try again in a minute, or reconnect with sandbox user_good / pass_good.");
+        toast.message("No new transactions yet — try again shortly");
       }
-    } catch {
-      setMessage("Sync failed. Check server/.env Plaid keys and that MongoDB is running.");
+    } catch (err: unknown) {
+      const apiError = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(apiError || "Sync failed");
     } finally {
       setSyncing(false);
     }
   };
 
+  const handleDisconnect = async () => {
+    setDisconnecting(true);
+    try {
+      await api.post("/api/plaid/disconnect");
+      toast.success("Bank disconnected");
+      onUpdated();
+    } catch {
+      toast.error("Failed to disconnect");
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
   return (
-    <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-6 shadow-sm">
-      <h2 className="text-xl font-semibold text-slate-900">
-        {connected ? "Sync your sandbox transactions" : "Connect a sandbox bank"}
-      </h2>
-      <p className="mt-2 text-sm text-slate-600">
-        {connected
-          ? "Your bank is linked but no transactions are in Finio yet. Run a sync, or reconnect via Plaid Link."
-          : "Use Plaid sandbox credentials when prompted:"}{" "}
-        <code className="rounded bg-white px-1">user_good</code> / <code className="rounded bg-white px-1">pass_good</code>
-      </p>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <PlaidLinkButton onConnected={onUpdated} />
-        {connected && (
-          <button
-            type="button"
-            onClick={handleSync}
-            disabled={syncing}
-            className="rounded-lg border border-indigo-600 px-4 py-2 text-indigo-700 hover:bg-white disabled:opacity-50"
-          >
-            {syncing ? "Syncing..." : "Sync transactions"}
-          </button>
-        )}
+    <div className="finio-card border-indigo-200 bg-gradient-to-r from-indigo-50 to-white">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">
+            {connected ? "Manage sandbox bank" : "Connect a sandbox bank"}
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm text-slate-600">
+            Use Plaid test credentials <code className="rounded bg-white px-1">user_good</code> /{" "}
+            <code className="rounded bg-white px-1">pass_good</code>. Webhooks keep transactions updated after the first
+            sync.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <PlaidLinkButton label={connected ? "Reconnect bank" : "Connect Bank with Plaid"} />
+          {connected && (
+            <>
+              <button type="button" onClick={handleSync} disabled={syncing} className="finio-btn-secondary">
+                {syncing ? "Syncing..." : "Sync now"}
+              </button>
+              <button
+                type="button"
+                onClick={handleDisconnect}
+                disabled={disconnecting}
+                className="finio-btn-secondary text-red-600"
+              >
+                {disconnecting ? "..." : "Disconnect"}
+              </button>
+            </>
+          )}
+        </div>
       </div>
-      {message && <p className="mt-3 text-sm text-slate-700">{message}</p>}
     </div>
   );
 }

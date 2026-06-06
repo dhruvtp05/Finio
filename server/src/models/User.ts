@@ -1,17 +1,38 @@
-import mongoose from "mongoose";
+import mongoose, { Document, Model, Schema, Types } from "mongoose";
 
-const UserSchema = new mongoose.Schema(
+export interface IUser {
+  email: string;
+  name?: string;
+  image?: string;
+  /** @deprecated use plaidAccessTokenEnc */
+  plaidAccessToken?: string;
+  plaidAccessTokenEnc?: string;
+  plaidItemId?: string;
+  plaidSyncCursor?: string;
+  connectedAt?: Date;
+}
+
+export interface IUserDocument extends IUser, Document {
+  _id: Types.ObjectId;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const UserSchema = new Schema<IUserDocument>(
   {
-    email: { type: String, required: true, unique: true },
+    email: { type: String, required: true, unique: true, index: true },
     name: String,
     image: String,
-    plaidAccessToken: String,
-    plaidItemId: String,
+    plaidAccessToken: { type: String, select: false },
+    plaidAccessTokenEnc: { type: String, select: false },
+    plaidItemId: { type: String, index: true },
+    plaidSyncCursor: { type: String, select: false },
     connectedAt: Date,
   },
   { timestamps: true }
 );
 
-const User = (mongoose.models.User as mongoose.Model<any>) || mongoose.model("User", UserSchema);
+const User: Model<IUserDocument> =
+  (mongoose.models.User as Model<IUserDocument>) || mongoose.model<IUserDocument>("User", UserSchema);
 
 export default User;

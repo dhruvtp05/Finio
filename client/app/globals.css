@@ -1,7 +1,115 @@
 @tailwind base;
+
 @tailwind components;
+
 @tailwind utilities;
 
-body {
-  @apply bg-slate-50 text-slate-900;
+
+
+:root {
+
+  --finio-bg: #f8fafc;
+
+  --finio-surface: #ffffff;
+
+  --finio-accent: #6366f1;
+
+  --finio-accent-soft: #eef2ff;
+
+  --finio-muted: #64748b;
+
 }
+
+
+
+.dark {
+
+  --finio-bg: #0f172a;
+
+  --finio-surface: #1e293b;
+
+  --finio-accent: #818cf8;
+
+  --finio-accent-soft: #312e81;
+
+  --finio-muted: #94a3b8;
+
+}
+
+
+
+body {
+
+  @apply min-h-screen bg-gradient-to-br from-slate-100 via-indigo-50/30 to-slate-100 text-slate-900 antialiased;
+
+}
+
+
+
+.dark body {
+
+  @apply from-slate-950 via-slate-900 to-slate-950 text-slate-100;
+
+}
+
+
+
+@layer components {
+
+  .finio-card {
+
+    @apply rounded-2xl border border-white/60 bg-white/80 p-5 shadow-sm shadow-slate-200/60 backdrop-blur;
+
+  }
+
+
+
+  .dark .finio-card {
+
+    @apply border-slate-700/60 bg-slate-800/80 shadow-slate-950/40;
+
+  }
+
+
+
+  .finio-btn-primary {
+
+    @apply rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:opacity-50;
+
+  }
+
+
+
+  .dark .finio-btn-primary {
+
+    @apply bg-indigo-500 hover:bg-indigo-400;
+
+  }
+
+
+
+  .finio-btn-secondary {
+
+    @apply rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50;
+
+  }
+
+
+
+  .dark .finio-btn-secondary {
+
+    @apply border-slate-600 bg-slate-800 text-slate-200 hover:bg-slate-700;
+
+  }
+
+
+
+  .finio-input {
+
+    @apply rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-indigo-200 focus:ring-2 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:ring-indigo-500/40;
+
+  }
+
+}
+
+

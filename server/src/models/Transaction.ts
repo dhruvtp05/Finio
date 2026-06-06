@@ -1,20 +1,44 @@
-import mongoose from "mongoose";
+import mongoose, { Document, Model, Schema, Types } from "mongoose";
 
-const TransactionSchema = new mongoose.Schema(
+export interface ITransaction {
+  userId: Types.ObjectId;
+  plaidTransactionId?: string;
+  name?: string;
+  amount: number;
+  category?: string[];
+  userCategory?: string;
+  suggestedCategory?: string;
+  date: Date;
+  merchantName?: string;
+  pending?: boolean;
+}
+
+export interface ITransactionDocument extends ITransaction, Document {
+  _id: Types.ObjectId;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const TransactionSchema = new Schema<ITransactionDocument>(
   {
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
-    plaidTransactionId: { type: String, unique: true },
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    plaidTransactionId: { type: String, unique: true, sparse: true },
     name: String,
-    amount: Number,
+    amount: { type: Number, required: true },
     category: [String],
-    date: Date,
+    userCategory: String,
+    suggestedCategory: String,
+    date: { type: Date, required: true, index: true },
     merchantName: String,
     pending: Boolean,
   },
   { timestamps: true }
 );
 
-const Transaction =
-  (mongoose.models.Transaction as mongoose.Model<any>) || mongoose.model("Transaction", TransactionSchema);
+TransactionSchema.index({ userId: 1, date: -1 });
+
+const Transaction: Model<ITransactionDocument> =
+  (mongoose.models.Transaction as Model<ITransactionDocument>) ||
+  mongoose.model<ITransactionDocument>("Transaction", TransactionSchema);
 
 export default Transaction;

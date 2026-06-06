@@ -1,73 +1,22 @@
 import { Router } from "express";
-import {
-  Configuration,
-  CountryCode,
-  PlaidApi,
-  PlaidEnvironments,
-  Products,
-} from "plaid";
+import { CountryCode, Products } from "plaid";
 import auth from "../middleware/auth";
 import User from "../models/User";
 import Transaction from "../models/Transaction";
+import { getPlaidClient, plaidErrorMessage } from "../services/plaidClient";
+import { getUserAccessToken, setUserAccessToken, syncUserByItemId, syncUserTransactions } from "../services/plaidSync";
 
 const router = Router();
 
-let plaidClient: PlaidApi | null = null;
-
-function getPlaidClient(): PlaidApi {
-  const clientId = process.env.PLAID_CLIENT_ID?.trim();
-  const secret = process.env.PLAID_SECRET?.trim();
-
-  if (!clientId || !secret) {
-    throw new Error("PLAID_CLIENT_ID and PLAID_SECRET must be set in server/.env");
-  }
-
-  if (!plaidClient) {
-    const plaidEnv = (process.env.PLAID_ENV || "sandbox") as keyof typeof PlaidEnvironments;
-    const plaidBasePath = PlaidEnvironments[plaidEnv] ?? PlaidEnvironments.sandbox;
-
-    plaidClient = new PlaidApi(
-      new Configuration({
-        basePath: plaidBasePath,
-        baseOptions: {
-          headers: {
-            "PLAID-CLIENT-ID": clientId,
-            "PLAID-SECRET": secret,
-          },
-        },
-      })
-    );
-  }
-
-  return plaidClient;
-}
-
-function plaidErrorMessage(error: unknown): string {
-  const data = (error as { response?: { data?: { error_message?: string; error_code?: string } } })
-    ?.response?.data;
-  if (data?.error_message) {
-    return data.error_code ? `${data.error_code}: ${data.error_message}` : data.error_message;
-  }
-  if (error instanceof Error) return error.message;
-  return "Unknown Plaid error";
-}
-
 async function findOrCreateUser(email: string) {
-  return (User as any).findOneAndUpdate(
-    { email },
-    { $setOnInsert: { email } },
-    { upsert: true, new: true }
-  );
+  return User.findOneAndUpdate({ email }, { $setOnInsert: { email } }, { upsert: true, new: true });
 }
 
 router.get("/status", auth, async (req, res) => {
   try {
-    const user = await (User as any).findOne({ email: req.user!.email });
-    const connected = Boolean(user?.plaidAccessToken);
-    const transactionCount = user
-      ? await (Transaction as any).countDocuments({ userId: user._id })
-      : 0;
-
+    const user = await User.findOne({ email: req.user!.email }).select("+plaidAccessTokenEnc +plaidAccessToken");
+    const connected = Boolean(user && getUserAccessToken(user));
+    const transactionCount = user ? await Transaction.countDocuments({ userId: user._id }) : 0;
     res.json({ connected, transactionCount });
   } catch (error) {
     console.error("plaid/status failed", error);
@@ -85,11 +34,12 @@ router.post("/create-link-token", auth, async (req, res) => {
       language: "en",
       country_codes: [CountryCode.Us],
       products: [Products.Transactions],
+      ...(process.env.PLAID_WEBHOOK_URL ? { webhook: process.env.PLAID_WEBHOOK_URL } : {}),
     });
 
     res.json({ link_token: plaidRes.data.link_token });
   } catch (error) {
-    console.error("create-link-token failed", (error as any)?.response?.data || error);
+    console.error("create-link-token failed", (error as { response?: { data?: unknown } })?.response?.data || error);
     res.status(500).json({ error: plaidErrorMessage(error) });
   }
 });
@@ -100,103 +50,83 @@ router.post("/exchange-token", auth, async (req, res) => {
     if (!public_token) return res.status(400).json({ error: "public_token is required" });
 
     const exchange = await getPlaidClient().itemPublicTokenExchange({ public_token });
-
-    await (User as any).findOneAndUpdate(
+    const user = await User.findOneAndUpdate(
       { email: req.user!.email },
       {
-        plaidAccessToken: exchange.data.access_token,
         plaidItemId: exchange.data.item_id,
         connectedAt: new Date(),
+        plaidSyncCursor: undefined,
       },
       { upsert: true, new: true }
     );
 
-    res.json({ success: true });
+    if (!user) return res.status(500).json({ error: "Failed to save user" });
+
+    await setUserAccessToken(user, exchange.data.access_token);
+    const synced = await syncUserTransactions(user);
+
+    res.json({ success: true, synced });
   } catch (error) {
-    console.error("exchange-token failed", (error as any)?.response?.data || error);
+    console.error("exchange-token failed", (error as { response?: { data?: unknown } })?.response?.data || error);
     res.status(500).json({ error: plaidErrorMessage(error) });
   }
 });
 
-function txnToUpsert(userId: unknown, txn: {
-  transaction_id: string;
-  name: string;
-  amount: number;
-  category?: string[] | null;
-  date: string;
-  merchant_name?: string | null;
-  pending?: boolean | null;
-}) {
-  return {
-    updateOne: {
-      filter: { plaidTransactionId: txn.transaction_id },
-      update: {
-        $set: {
-          userId,
-          plaidTransactionId: txn.transaction_id,
-          name: txn.name,
-          amount: txn.amount,
-          category: txn.category || [],
-          date: new Date(txn.date),
-          merchantName: txn.merchant_name,
-          pending: txn.pending,
-        },
-      },
-      upsert: true,
-    },
-  };
-}
-
 router.post("/sync", auth, async (req, res) => {
   try {
-    const user = await (User as any).findOne({ email: req.user!.email });
-    if (!user?.plaidAccessToken) return res.status(400).json({ error: "No connected Plaid account" });
-
-    const collected: Array<{
-      transaction_id: string;
-      name: string;
-      amount: number;
-      category?: string[] | null;
-      date: string;
-      merchant_name?: string | null;
-      pending?: boolean | null;
-    }> = [];
-
-    let cursor: string | undefined;
-    let hasMore = true;
-
-    while (hasMore) {
-      const syncRes = await getPlaidClient().transactionsSync({
-        access_token: user.plaidAccessToken,
-        cursor,
-      });
-      collected.push(...syncRes.data.added);
-      cursor = syncRes.data.next_cursor;
-      hasMore = syncRes.data.has_more;
+    const user = await User.findOne({ email: req.user!.email }).select("+plaidAccessTokenEnc +plaidAccessToken +plaidSyncCursor");
+    if (!user || !getUserAccessToken(user)) {
+      return res.status(400).json({ error: "No connected Plaid account" });
     }
 
-    if (!collected.length) {
-      const start = new Date();
-      start.setDate(start.getDate() - 30);
-      const end = new Date();
-      const txRes = await getPlaidClient().transactionsGet({
-        access_token: user.plaidAccessToken,
-        start_date: start.toISOString().slice(0, 10),
-        end_date: end.toISOString().slice(0, 10),
-      });
-      collected.push(...txRes.data.transactions);
-    }
-
-    const ops = collected.map((txn) => txnToUpsert(user._id, txn));
-
-    if (ops.length) {
-      await (Transaction as any).bulkWrite(ops);
-    }
-
-    res.json({ synced: ops.length });
+    const synced = await syncUserTransactions(user);
+    res.json({ synced });
   } catch (error) {
-    console.error("sync failed", (error as any)?.response?.data || error);
+    console.error("sync failed", (error as { response?: { data?: unknown } })?.response?.data || error);
     res.status(500).json({ error: plaidErrorMessage(error) });
+  }
+});
+
+router.post("/disconnect", auth, async (req, res) => {
+  try {
+    await User.findOneAndUpdate(
+      { email: req.user!.email },
+      {
+        $unset: {
+          plaidAccessToken: "",
+          plaidAccessTokenEnc: "",
+          plaidItemId: "",
+          plaidSyncCursor: "",
+          connectedAt: "",
+        },
+      }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error("disconnect failed", error);
+    res.status(500).json({ error: "Failed to disconnect Plaid" });
+  }
+});
+
+router.post("/webhook", async (req, res) => {
+  try {
+    const { webhook_type, webhook_code, item_id } = req.body as {
+      webhook_type?: string;
+      webhook_code?: string;
+      item_id?: string;
+    };
+
+    if (webhook_type === "TRANSACTIONS" && item_id) {
+      const relevantCodes = ["SYNC_UPDATES_AVAILABLE", "DEFAULT_UPDATE", "INITIAL_UPDATE", "HISTORICAL_UPDATE"];
+      if (!webhook_code || relevantCodes.includes(webhook_code)) {
+        await syncUserByItemId(item_id);
+      }
+    }
+
+    res.json({ received: true });
+  } catch (error) {
+    console.error("webhook failed", error);
+    res.status(500).json({ error: "Webhook processing failed" });
   }
 });
 
