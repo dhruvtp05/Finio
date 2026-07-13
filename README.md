@@ -12,20 +12,20 @@
 
 ---
 
-## ✨ Features
+##  Features
 
-* 🔐 **Google Sign-In** Secure authentication with NextAuth — no passwords to manage.
-* 🏦 **Plaid Bank Sync** Link a sandbox bank, sync transactions automatically (webhooks + manual refresh), with encrypted access tokens at rest.
-* 📊 **Cash Flow Dashboard** Money in vs money out this month, savings rate %, average daily spend, and lifetime net position — all computed from data you already have.
-* 🔁 **Recurring & Subscriptions** Detects merchants that repeat monthly or weekly (Netflix, gym, etc.) from transaction patterns — no subscription APIs required.
-* 🎯 **Savings Goals** Set targets like “Save $2,000 by December” with progress bars driven by income minus spending since the goal was created.
-* 📈 **Budgets & Charts** Editable category budgets with progress bars, spending timeline charts (daily / weekly / monthly / yearly), and category breakdowns.
-* 🌙 **Dark Mode** Toggle in the nav bar; preference persists in local storage.
-* 📤 **CSV Export** Download filtered transactions for spreadsheets or tax prep.
+*  **Google Sign-In** Secure authentication with NextAuth — no passwords to manage.
+*  **Plaid Bank Sync** Link a sandbox bank, sync transactions automatically (webhooks + manual refresh), with encrypted access tokens at rest.
+*  **Cash Flow Dashboard** Money in vs money out this month, savings rate %, average daily spend, and lifetime net position — all computed from data you already have.
+*  **Recurring & Subscriptions** Detects merchants that repeat monthly or weekly (Netflix, gym, etc.) from transaction patterns — no subscription APIs required.
+*  **Savings Goals** Set targets like “Save $2,000 by December” with progress bars driven by income minus spending since the goal was created.
+*  **Budgets & Charts** Editable category budgets with progress bars, spending timeline charts (daily / weekly / monthly / yearly), and category breakdowns.
+*  **Dark Mode** Toggle in the nav bar; preference persists in local storage.
+*  **CSV Export** Download filtered transactions for spreadsheets or tax prep.
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 Get up and running locally in just a few steps:
 
@@ -49,7 +49,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser. Sign in wit
 
 ---
 
-## 🔑 Configuration & API Keys
+##  Configuration & API Keys
 
 The app needs Google OAuth, MongoDB, Plaid sandbox credentials, and a shared JWT secret. Create `client/.env.local` and `server/.env` from the examples.
 
@@ -104,7 +104,7 @@ NEXT_PUBLIC_API_URL=http://localhost:5000
 
 ---
 
-## 💻 Tech Stack
+##  Tech Stack
 
 * **Framework:** Next.js (App Router)
 * **UI:** React, Tailwind CSS, Recharts, Sonner toasts
@@ -115,13 +115,13 @@ NEXT_PUBLIC_API_URL=http://localhost:5000
 
 ---
 
-## 📐 System design
+##  System design
 
 For architecture, data models, and how recurring detection / goals / cash flow work under the hood, see **[SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md)**.
 
 ---
 
-## 🧪 Plaid sandbox tips
+##  Plaid sandbox tips
 
 * Pick any sandbox bank in Link; credentials are `user_good` / `pass_good`.
 * For automatic re-sync via webhooks, expose port 5000 with ngrok and set `PLAID_WEBHOOK_URL`.
@@ -129,7 +129,7 @@ For architecture, data models, and how recurring detection / goals / cash flow w
 
 ---
 
-## 🚢 Deploy
+##  Deploy
 
 * **Client:** Vercel — set all `client/.env` vars and production Google redirect URI.
 * **Server:** Render, Railway, or similar — set `server/.env`, allow CORS to your Vercel URL, register webhook URL in Plaid.
