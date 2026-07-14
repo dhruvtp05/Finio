@@ -136,7 +136,7 @@ For architecture, data models, and how recurring detection / goals / cash flow w
 
 ---
 
-## 🔒 Security
+##  Security
 
 * Never commit `.env` files.
 * Rotate secrets if exposed.
