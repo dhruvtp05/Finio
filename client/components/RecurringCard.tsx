@@ -6,13 +6,20 @@ import { RecurringSubscriptionDto } from "@/lib/types";
 const currency = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
 export default function RecurringCard({ subscriptions }: { subscriptions: RecurringSubscriptionDto[] }) {
+  const yearlyTotal = subscriptions.reduce((s, sub) => s + (sub.yearlyCost || 0), 0);
+
   return (
     <div className="finio-card h-full">
       <div className="mb-4">
         <h3 className="text-lg font-semibold">Subscriptions & recurring</h3>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Merchants that repeat on a monthly or weekly cadence, detected from your history.
+          Fuzzy merchant matching · weekly / monthly / annual · estimated yearly cost
         </p>
+        {subscriptions.length > 0 && (
+          <p className="mt-2 text-sm font-medium text-indigo-600 dark:text-indigo-400">
+            ~{currency.format(yearlyTotal)} / year if you keep them all
+          </p>
+        )}
       </div>
 
       {subscriptions.length === 0 ? (
@@ -29,15 +36,22 @@ export default function RecurringCard({ subscriptions }: { subscriptions: Recurr
               <div className="min-w-0">
                 <p className="truncate font-medium text-slate-800 dark:text-slate-100">{sub.merchantName}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {sub.category} · {sub.cadence} · {sub.occurrenceCount} charges · {sub.monthsActive} mo.
+                  {sub.category} · {sub.cadence} · {sub.occurrenceCount} charges
                 </p>
                 <p className="mt-0.5 text-xs text-slate-400">
-                  Last: {format(new Date(sub.lastDate), "MMM d, yyyy")}
+                  Last {format(new Date(sub.lastDate), "MMM d, yyyy")}
+                  {sub.nextExpectedDate
+                    ? ` · next ~${format(new Date(sub.nextExpectedDate), "MMM d")}`
+                    : ""}
+                </p>
+                <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+                  Cancel? Saves ~{currency.format(sub.yearlyCost)}/yr
                 </p>
               </div>
               <div className="shrink-0 text-right">
                 <p className="font-semibold text-indigo-600 dark:text-indigo-400">{currency.format(sub.avgAmount)}</p>
                 <p className="text-xs text-slate-400">avg / charge</p>
+                <p className="mt-1 text-xs text-slate-500">{currency.format(sub.yearlyCost)}/yr</p>
               </div>
             </li>
           ))}

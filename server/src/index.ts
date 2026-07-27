@@ -10,6 +10,8 @@ import budgetRoutes from "./routes/budgets";
 import userRoutes from "./routes/users";
 import categoryRoutes from "./routes/categories";
 import goalRoutes from "./routes/goals";
+import alertRoutes from "./routes/alerts";
+import accountRoutes from "./routes/accounts";
 
 const app = express();
 
@@ -45,6 +47,8 @@ app.use("/api/budgets", budgetRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/goals", goalRoutes);
+app.use("/api/alerts", alertRoutes);
+app.use("/api/accounts", accountRoutes);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error("Unhandled API error", err);

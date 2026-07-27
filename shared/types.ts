@@ -15,8 +15,13 @@ export interface TransactionDto {
   category?: string[];
   userCategory?: string;
   suggestedCategory?: string;
+  categoryLocked?: boolean;
   amount: number;
   pending?: boolean;
+  source?: "plaid" | "manual";
+  note?: string;
+  excludedFromTotals?: boolean;
+  splitFromId?: string;
 }
 
 export interface BudgetDto {
@@ -74,17 +79,24 @@ export interface CashFlowDto {
   avgDailySpend: number;
   netWorth: number;
   daysElapsedInMonth: number;
+  netWorthSource?: "accounts" | "transactions";
+  assets?: number;
+  liabilities?: number;
 }
+
+export type RecurringCadence = "monthly" | "weekly" | "annual";
 
 export interface RecurringSubscriptionDto {
   merchantKey: string;
   merchantName: string;
   category: string;
   avgAmount: number;
-  cadence: "monthly" | "weekly";
+  cadence: RecurringCadence;
   occurrenceCount: number;
   lastDate: string;
   monthsActive: number;
+  yearlyCost: number;
+  nextExpectedDate: string | null;
 }
 
 export interface RecurringDto {
@@ -100,4 +112,78 @@ export interface GoalDto {
   saved: number;
   progressPercent: number;
   completed: boolean;
+}
+
+export type AlertSeverity = "info" | "warn" | "critical";
+
+export interface AlertDto {
+  key: string;
+  kind: "budget" | "goal";
+  severity: AlertSeverity;
+  title: string;
+  message: string;
+  href?: string;
+}
+
+export interface AlertsResponse {
+  alerts: AlertDto[];
+}
+
+export interface AccountDto {
+  _id: string;
+  plaidAccountId: string;
+  name: string;
+  officialName?: string;
+  type: string;
+  subtype?: string;
+  mask?: string;
+  currentBalance: number;
+  availableBalance?: number;
+  isoCurrencyCode?: string;
+  lastSyncedAt: string;
+  contribution: number;
+}
+
+export interface NetWorthHistoryPoint {
+  date: string;
+  netWorth: number;
+  assets: number;
+  liabilities: number;
+}
+
+export interface AccountsDto {
+  accounts: AccountDto[];
+  netWorth: number;
+  assets: number;
+  liabilities: number;
+  history: NetWorthHistoryPoint[];
+}
+
+export interface MonthPeriodMetrics {
+  key: string;
+  label: string;
+  spent: number;
+  income: number;
+  net: number;
+  byCategory: Array<{ category: string; total: number }>;
+}
+
+export interface MonthCompareDto {
+  current: MonthPeriodMetrics;
+  previousMonth: MonthPeriodMetrics;
+  sameMonthLastYear: MonthPeriodMetrics;
+  vsPreviousMonth: {
+    spentDelta: number;
+    spentDeltaPercent: number | null;
+    incomeDelta: number;
+    incomeDeltaPercent: number | null;
+    netDelta: number;
+  };
+  vsSameMonthLastYear: {
+    spentDelta: number;
+    spentDeltaPercent: number | null;
+    incomeDelta: number;
+    incomeDeltaPercent: number | null;
+    netDelta: number;
+  };
 }

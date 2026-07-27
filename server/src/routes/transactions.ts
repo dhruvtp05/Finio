@@ -2,11 +2,14 @@ import { Router } from "express";
 import { Types } from "mongoose";
 import auth from "../middleware/auth";
 import User from "../models/User";
+import Account from "../models/Account";
 import Transaction, { ITransactionDocument } from "../models/Transaction";
 import { effectiveCategory, isFinioCategory } from "../services/categorization";
 import { buildSpendingTimeline, isValidGroupBy } from "../utils/spendingTimeline";
 import { detectRecurringSubscriptions } from "../utils/recurring";
 import { computeCashFlowMetrics } from "../utils/cashFlow";
+import { computeMonthCompare } from "../utils/monthCompare";
+import { computeNetWorthFromAccounts } from "../utils/netWorth";
 
 const router = Router();
 
@@ -21,7 +24,7 @@ function monthKey(date: Date) {
 }
 
 function buildQuery(userId: Types.ObjectId, params: { month?: string; category?: string; search?: string }) {
-  const query: Record<string, unknown> = { userId };
+  const query: Record<string, unknown> = { userId, excludedFromTotals: { $ne: true } };
 
   if (params.month && /^\d{4}-\d{2}$/.test(params.month)) {
     const [y, m] = params.month.split("-").map(Number);
@@ -60,8 +63,13 @@ function toDto(txn: ITransactionDocument) {
     category: txn.category,
     userCategory: txn.userCategory,
     suggestedCategory: txn.suggestedCategory,
+    categoryLocked: Boolean(txn.categoryLocked),
     amount: txn.amount,
     pending: txn.pending,
+    source: txn.source || "plaid",
+    note: txn.note,
+    excludedFromTotals: Boolean(txn.excludedFromTotals),
+    splitFromId: txn.splitFromId?.toString(),
   };
 }
 
@@ -70,7 +78,9 @@ router.get("/filters", auth, async (req, res) => {
     const user = await User.findOne({ email: req.user!.email });
     if (!user) return res.json({ months: [], categories: [] });
 
-    const txns = await Transaction.find({ userId: user._id }).select("date category userCategory suggestedCategory");
+    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select(
+      "date category userCategory suggestedCategory"
+    );
     const months = new Set<string>();
     const categories = new Set<string>();
 
@@ -100,13 +110,13 @@ router.get("/export", auth, async (req, res) => {
 
     const txns = await Transaction.find(buildQuery(user._id, { month, category, search })).sort({ date: -1 });
 
-    const header = "Date,Merchant,Category,Amount,Pending\n";
+    const header = "Date,Merchant,Category,Amount,Pending,Source,Locked\n";
     const rows = txns
       .map((txn) => {
         const date = new Date(txn.date).toISOString().slice(0, 10);
         const merchant = (txn.merchantName || txn.name || "").replace(/"/g, '""');
         const cat = effectiveCategory(txn).replace(/"/g, '""');
-        return `${date},"${merchant}","${cat}",${txn.amount},${txn.pending ? "yes" : "no"}`;
+        return `${date},"${merchant}","${cat}",${txn.amount},${txn.pending ? "yes" : "no"},${txn.source || "plaid"},${txn.categoryLocked ? "yes" : "no"}`;
       })
       .join("\n");
 
@@ -119,60 +129,24 @@ router.get("/export", auth, async (req, res) => {
   }
 });
 
-router.patch("/:id/category", auth, async (req, res) => {
+router.get("/compare", auth, async (req, res) => {
   try {
     const user = await User.findOne({ email: req.user!.email });
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const { category } = req.body as { category?: string };
-    if (!category?.trim() || !isFinioCategory(category.trim())) {
-      return res.status(400).json({ error: "Invalid category" });
+    if (!user) {
+      return res.json(computeMonthCompare([]));
     }
 
-    const txn = await Transaction.findOneAndUpdate(
-      { _id: req.params.id, userId: user._id },
-      { userCategory: category.trim() },
-      { new: true }
-    );
-
-    if (!txn) return res.status(404).json({ error: "Transaction not found" });
-    res.json(toDto(txn));
+    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } });
+    const mapped = txns.map((t) => ({
+      amount: t.amount,
+      date: t.date,
+      category: effectiveCategory(t),
+      excludedFromTotals: t.excludedFromTotals,
+    }));
+    return res.json(computeMonthCompare(mapped));
   } catch (error) {
-    console.error("category patch failed", error);
-    res.status(500).json({ error: "Failed to update category" });
-  }
-});
-
-router.get("/", auth, async (req, res) => {
-  try {
-    const month = typeof req.query.month === "string" ? req.query.month : undefined;
-    const category = typeof req.query.category === "string" ? req.query.category : undefined;
-    const search = typeof req.query.search === "string" ? req.query.search : undefined;
-    const limit = Math.min(Number(req.query.limit || 25), 100);
-    const page = Math.max(Number(req.query.page || 1), 1);
-
-    const user = await User.findOne({ email: req.user!.email });
-    if (!user) return res.json({ transactions: [], total: 0, page, limit, totalPages: 0 });
-
-    const query = buildQuery(user._id, { month, category, search });
-    const [transactions, total] = await Promise.all([
-      Transaction.find(query)
-        .sort({ date: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit),
-      Transaction.countDocuments(query),
-    ]);
-
-    return res.json({
-      transactions: transactions.map(toDto),
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit) || 0,
-    });
-  } catch (error) {
-    console.error("transactions GET failed", error);
-    res.status(500).json({ error: "Failed to load transactions" });
+    console.error("compare failed", error);
+    res.status(500).json({ error: "Failed to load month comparison" });
   }
 });
 
@@ -190,7 +164,7 @@ router.get("/spending-timeline", auth, async (req, res) => {
       return res.json({ groupBy: groupByParam, data: [] });
     }
 
-    const txns = await Transaction.find({ userId: user._id }).select("date amount");
+    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select("date amount");
     const data = buildSpendingTimeline(txns, groupByParam, limit);
 
     return res.json({ groupBy: groupByParam, data });
@@ -205,7 +179,7 @@ router.get("/recurring", auth, async (req, res) => {
     const user = await User.findOne({ email: req.user!.email });
     if (!user) return res.json({ subscriptions: [] });
 
-    const txns = await Transaction.find({ userId: user._id }).sort({ date: -1 });
+    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).sort({ date: -1 });
     const subscriptions = detectRecurringSubscriptions(txns, effectiveCategory);
 
     return res.json({ subscriptions });
@@ -227,11 +201,23 @@ router.get("/cashflow", auth, async (req, res) => {
         avgDailySpend: 0,
         netWorth: 0,
         daysElapsedInMonth: new Date().getDate(),
+        netWorthSource: "transactions" as const,
       });
     }
 
-    const txns = await Transaction.find({ userId: user._id }).select("amount date");
-    return res.json(computeCashFlowMetrics(txns));
+    const [txns, accounts] = await Promise.all([
+      Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select("amount date"),
+      Account.find({ userId: user._id }),
+    ]);
+
+    const metrics = computeCashFlowMetrics(txns);
+    if (accounts.length) {
+      const fromBalances = computeNetWorthFromAccounts(accounts);
+      metrics.netWorth = fromBalances.netWorth;
+      return res.json({ ...metrics, netWorthSource: "accounts" as const, assets: fromBalances.assets, liabilities: fromBalances.liabilities });
+    }
+
+    return res.json({ ...metrics, netWorthSource: "transactions" as const });
   } catch (error) {
     console.error("cashflow failed", error);
     res.status(500).json({ error: "Failed to load cash flow" });
@@ -252,7 +238,7 @@ router.get("/summary", auth, async (req, res) => {
       });
     }
 
-    const txns = await Transaction.find({ userId: user._id });
+    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } });
     const { start, end } = getMonthRange();
 
     let totalSpent = 0;
@@ -302,6 +288,191 @@ router.get("/summary", auth, async (req, res) => {
   } catch (error) {
     console.error("summary failed", error);
     res.status(500).json({ error: "Failed to load summary" });
+  }
+});
+
+router.post("/", auth, async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.user!.email });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const { name, merchantName, amount, date, category, note, type } = req.body as {
+      name?: string;
+      merchantName?: string;
+      amount?: number;
+      date?: string;
+      category?: string;
+      note?: string;
+      /** expense (positive) or income (negative) */
+      type?: "expense" | "income";
+    };
+
+    if (typeof amount !== "number" || amount <= 0 || !date) {
+      return res.status(400).json({ error: "amount (>0) and date are required" });
+    }
+    if (category && !isFinioCategory(category)) {
+      return res.status(400).json({ error: "Invalid category" });
+    }
+
+    const signed = type === "income" ? -Math.abs(amount) : Math.abs(amount);
+    const txn = await Transaction.create({
+      userId: user._id,
+      name: name?.trim() || merchantName?.trim() || "Manual entry",
+      merchantName: merchantName?.trim() || name?.trim() || "Manual",
+      amount: signed,
+      date: new Date(date),
+      userCategory: category || (type === "income" ? "Income" : "Other"),
+      suggestedCategory: category || (type === "income" ? "Income" : "Other"),
+      categoryLocked: Boolean(category),
+      source: "manual",
+      note: note?.trim(),
+      pending: false,
+    });
+
+    res.status(201).json(toDto(txn));
+  } catch (error) {
+    console.error("manual txn create failed", error);
+    res.status(500).json({ error: "Failed to create transaction" });
+  }
+});
+
+router.patch("/:id/category", auth, async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.user!.email });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const { category, locked } = req.body as { category?: string; locked?: boolean };
+    if (!category?.trim() || !isFinioCategory(category.trim())) {
+      return res.status(400).json({ error: "Invalid category" });
+    }
+
+    const txn = await Transaction.findOneAndUpdate(
+      { _id: req.params.id, userId: user._id, excludedFromTotals: { $ne: true } },
+      {
+        userCategory: category.trim(),
+        categoryLocked: locked !== false,
+      },
+      { new: true }
+    );
+
+    if (!txn) return res.status(404).json({ error: "Transaction not found" });
+    res.json(toDto(txn));
+  } catch (error) {
+    console.error("category patch failed", error);
+    res.status(500).json({ error: "Failed to update category" });
+  }
+});
+
+router.post("/:id/split", auth, async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.user!.email });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const parent = await Transaction.findOne({
+      _id: req.params.id,
+      userId: user._id,
+      excludedFromTotals: { $ne: true },
+    });
+    if (!parent) return res.status(404).json({ error: "Transaction not found" });
+
+    const { parts } = req.body as {
+      parts?: Array<{ amount: number; category: string; name?: string }>;
+    };
+
+    if (!Array.isArray(parts) || parts.length < 2) {
+      return res.status(400).json({ error: "At least 2 parts required" });
+    }
+
+    const absParent = Math.abs(parent.amount);
+    const sign = parent.amount >= 0 ? 1 : -1;
+    let sum = 0;
+    for (const p of parts) {
+      if (typeof p.amount !== "number" || p.amount <= 0 || !isFinioCategory(p.category)) {
+        return res.status(400).json({ error: "Each part needs amount > 0 and a valid category" });
+      }
+      sum += p.amount;
+    }
+    if (Math.abs(sum - absParent) > 0.02) {
+      return res.status(400).json({ error: `Parts must sum to ${absParent.toFixed(2)}` });
+    }
+
+    parent.excludedFromTotals = true;
+    await parent.save();
+
+    const children = await Transaction.insertMany(
+      parts.map((p) => ({
+        userId: user._id,
+        name: p.name?.trim() || parent.name,
+        merchantName: parent.merchantName,
+        amount: sign * p.amount,
+        date: parent.date,
+        userCategory: p.category,
+        suggestedCategory: p.category,
+        categoryLocked: true,
+        source: parent.source === "manual" ? "manual" : "manual",
+        note: `Split from ${parent.merchantName || parent.name || parent._id}`,
+        splitFromId: parent._id,
+        pending: false,
+      }))
+    );
+
+    res.status(201).json({ parent: toDto(parent), parts: children.map(toDto) });
+  } catch (error) {
+    console.error("split failed", error);
+    res.status(500).json({ error: "Failed to split transaction" });
+  }
+});
+
+router.delete("/:id", auth, async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.user!.email });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const txn = await Transaction.findOne({ _id: req.params.id, userId: user._id });
+    if (!txn) return res.status(404).json({ error: "Transaction not found" });
+
+    if (txn.source !== "manual" && !txn.splitFromId) {
+      return res.status(400).json({ error: "Only manual (or split) transactions can be deleted" });
+    }
+
+    await Transaction.deleteOne({ _id: txn._id });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("txn delete failed", error);
+    res.status(500).json({ error: "Failed to delete transaction" });
+  }
+});
+
+router.get("/", auth, async (req, res) => {
+  try {
+    const month = typeof req.query.month === "string" ? req.query.month : undefined;
+    const category = typeof req.query.category === "string" ? req.query.category : undefined;
+    const search = typeof req.query.search === "string" ? req.query.search : undefined;
+    const limit = Math.min(Number(req.query.limit || 25), 100);
+    const page = Math.max(Number(req.query.page || 1), 1);
+
+    const user = await User.findOne({ email: req.user!.email });
+    if (!user) return res.json({ transactions: [], total: 0, page, limit, totalPages: 0 });
+
+    const query = buildQuery(user._id, { month, category, search });
+    const [transactions, total] = await Promise.all([
+      Transaction.find(query)
+        .sort({ date: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Transaction.countDocuments(query),
+    ]);
+
+    return res.json({
+      transactions: transactions.map(toDto),
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit) || 0,
+    });
+  } catch (error) {
+    console.error("transactions GET failed", error);
+    res.status(500).json({ error: "Failed to load transactions" });
   }
 });
 

@@ -1,7 +1,10 @@
 import { Types } from "mongoose";
+import Account from "../models/Account";
+import NetWorthSnapshot from "../models/NetWorthSnapshot";
 import Transaction from "../models/Transaction";
 import User, { IUserDocument } from "../models/User";
 import { decryptSecret, encryptSecret } from "../utils/crypto";
+import { computeNetWorthFromAccounts } from "../utils/netWorth";
 import { normalizeToFinioCategory } from "./categorization";
 import { getPlaidClient } from "./plaidClient";
 
@@ -47,11 +50,62 @@ function txnToUpsert(userId: Types.ObjectId, txn: PlaidTxn) {
           date: new Date(txn.date),
           merchantName: txn.merchant_name ?? undefined,
           pending: txn.pending ?? undefined,
+          source: "plaid",
+        },
+        $setOnInsert: {
+          categoryLocked: false,
+          excludedFromTotals: false,
         },
       },
       upsert: true,
     },
   };
+}
+
+export async function syncUserAccounts(user: IUserDocument): Promise<number> {
+  const accessToken = getUserAccessToken(user);
+  if (!accessToken) {
+    throw new Error("No connected Plaid account");
+  }
+
+  const res = await getPlaidClient().accountsGet({ access_token: accessToken });
+  const now = new Date();
+  const ops = res.data.accounts.map((acct) => ({
+    updateOne: {
+      filter: { userId: user._id, plaidAccountId: acct.account_id },
+      update: {
+        $set: {
+          userId: user._id,
+          plaidAccountId: acct.account_id,
+          name: acct.name,
+          officialName: acct.official_name ?? undefined,
+          type: acct.type,
+          subtype: acct.subtype ?? undefined,
+          mask: acct.mask ?? undefined,
+          currentBalance: acct.balances.current ?? 0,
+          availableBalance: acct.balances.available ?? undefined,
+          isoCurrencyCode: acct.balances.iso_currency_code ?? "USD",
+          lastSyncedAt: now,
+        },
+      },
+      upsert: true,
+    },
+  }));
+
+  if (ops.length) {
+    await Account.bulkWrite(ops as Parameters<typeof Account.bulkWrite>[0]);
+  }
+
+  const accounts = await Account.find({ userId: user._id });
+  const { netWorth, assets, liabilities } = computeNetWorthFromAccounts(accounts);
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  await NetWorthSnapshot.findOneAndUpdate(
+    { userId: user._id, date: day },
+    { $set: { netWorth, assets, liabilities, date: day, userId: user._id } },
+    { upsert: true }
+  );
+
+  return ops.length;
 }
 
 export async function syncUserTransactions(user: IUserDocument): Promise<number> {
@@ -106,11 +160,21 @@ export async function syncUserTransactions(user: IUserDocument): Promise<number>
   }
 
   if (removedIds.length) {
-    await Transaction.deleteMany({ userId: user._id, plaidTransactionId: { $in: removedIds } });
+    await Transaction.deleteMany({
+      userId: user._id,
+      plaidTransactionId: { $in: removedIds },
+      excludedFromTotals: { $ne: true },
+    });
   }
 
   user.plaidSyncCursor = cursor;
   await user.save();
+
+  try {
+    await syncUserAccounts(user);
+  } catch (err) {
+    console.warn("Account balance sync failed (transactions still synced)", err);
+  }
 
   return upserts.length;
 }

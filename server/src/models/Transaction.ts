@@ -8,9 +8,17 @@ export interface ITransaction {
   category?: string[];
   userCategory?: string;
   suggestedCategory?: string;
+  /** When true, user category is preserved across Plaid syncs */
+  categoryLocked?: boolean;
   date: Date;
   merchantName?: string;
   pending?: boolean;
+  /** plaid = synced; manual = user-created */
+  source?: "plaid" | "manual";
+  note?: string;
+  /** Split parent or replaced txn — skip in totals */
+  excludedFromTotals?: boolean;
+  splitFromId?: Types.ObjectId;
 }
 
 export interface ITransactionDocument extends ITransaction, Document {
@@ -28,9 +36,14 @@ const TransactionSchema = new Schema<ITransactionDocument>(
     category: [String],
     userCategory: String,
     suggestedCategory: String,
+    categoryLocked: { type: Boolean, default: false },
     date: { type: Date, required: true, index: true },
     merchantName: String,
     pending: Boolean,
+    source: { type: String, enum: ["plaid", "manual"], default: "plaid" },
+    note: String,
+    excludedFromTotals: { type: Boolean, default: false },
+    splitFromId: { type: Schema.Types.ObjectId, ref: "Transaction" },
   },
   { timestamps: true }
 );

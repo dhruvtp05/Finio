@@ -37,9 +37,13 @@ export default function CashFlowCards({ cashFlow }: { cashFlow: CashFlowDto }) {
         hint={`Day ${cashFlow.daysElapsedInMonth} of month`}
       />
       <StatCard
-        title="Net position"
+        title="Net worth"
         value={`$${cashFlow.netWorth.toFixed(2)}`}
-        hint="Lifetime income minus spending"
+        hint={
+          cashFlow.netWorthSource === "accounts"
+            ? `Assets $${(cashFlow.assets ?? 0).toFixed(0)} − liabilities $${(cashFlow.liabilities ?? 0).toFixed(0)}`
+            : "Lifetime income minus spending (connect Plaid for live balances)"
+        }
         className="sm:col-span-2 lg:col-span-4"
         valueClassName={cashFlow.netWorth >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}
       />

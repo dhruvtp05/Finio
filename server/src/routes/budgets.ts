@@ -28,7 +28,11 @@ router.get("/", auth, async (req, res) => {
 
     const budgets = await Budget.find({ userId: user._id }).sort({ label: 1 });
     const { start, end } = getMonthRange();
-    const txns = await Transaction.find({ userId: user._id, date: { $gte: start, $lt: end } });
+    const txns = await Transaction.find({
+      userId: user._id,
+      date: { $gte: start, $lt: end },
+      excludedFromTotals: { $ne: true },
+    });
 
     const spentByCategory = new Map<string, number>();
     txns.forEach((txn) => {

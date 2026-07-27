@@ -13,7 +13,7 @@ router.get("/", auth, async (req, res) => {
     if (!user) return res.json([]);
 
     const goals = await Goal.find({ userId: user._id }).sort({ deadline: 1 });
-    const txns = await Transaction.find({ userId: user._id }).select("amount date");
+    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select("amount date");
 
     const result = goals.map((goal) => {
       const saved = computeGoalProgress(txns, goal.createdAt, goal.deadline);
@@ -107,7 +107,7 @@ router.put("/:id", auth, async (req, res) => {
     const goal = await Goal.findOneAndUpdate({ _id: req.params.id, userId: user._id }, updates, { new: true });
     if (!goal) return res.status(404).json({ error: "Goal not found" });
 
-    const txns = await Transaction.find({ userId: user._id }).select("amount date");
+    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select("amount date");
     const saved = computeGoalProgress(txns, goal.createdAt, goal.deadline);
 
     res.json({

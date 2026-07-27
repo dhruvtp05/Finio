@@ -11,14 +11,20 @@ import TransactionTable from "@/components/TransactionTable";
 import CashFlowCards from "@/components/CashFlowCards";
 import RecurringCard from "@/components/RecurringCard";
 import GoalsCard from "@/components/GoalsCard";
+import AlertsBanner from "@/components/AlertsBanner";
+import MonthCompareCard from "@/components/MonthCompareCard";
+import AccountsCard from "@/components/AccountsCard";
 import StatCard from "@/components/ui/StatCard";
 import { DashboardSkeleton } from "@/components/ui/Skeleton";
 import { PlaidLinkProvider } from "@/context/PlaidLinkContext";
 import api from "@/lib/api";
 import {
+  AccountsDto,
+  AlertDto,
   BudgetDto,
   CashFlowDto,
   GoalDto,
+  MonthCompareDto,
   RecurringDto,
   TransactionDto,
   TransactionSummary,
@@ -32,6 +38,9 @@ export default function DashboardClient() {
   const [goals, setGoals] = useState<GoalDto[]>([]);
   const [recent, setRecent] = useState<TransactionDto[]>([]);
   const [budgets, setBudgets] = useState<BudgetDto[]>([]);
+  const [alerts, setAlerts] = useState<AlertDto[]>([]);
+  const [compare, setCompare] = useState<MonthCompareDto | null>(null);
+  const [accounts, setAccounts] = useState<AccountsDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [plaidConnected, setPlaidConnected] = useState(false);
   const [transactionCount, setTransactionCount] = useState(0);
@@ -41,7 +50,18 @@ export default function DashboardClient() {
     setLoading(true);
     setError("");
     try {
-      const [summaryRes, cashFlowRes, recurringRes, txRes, statusRes, budgetsRes, goalsRes] = await Promise.all([
+      const [
+        summaryRes,
+        cashFlowRes,
+        recurringRes,
+        txRes,
+        statusRes,
+        budgetsRes,
+        goalsRes,
+        alertsRes,
+        compareRes,
+        accountsRes,
+      ] = await Promise.all([
         api.get<TransactionSummary>("/api/transactions/summary"),
         api.get<CashFlowDto>("/api/transactions/cashflow"),
         api.get<RecurringDto>("/api/transactions/recurring"),
@@ -49,6 +69,9 @@ export default function DashboardClient() {
         api.get<{ connected: boolean; transactionCount: number }>("/api/plaid/status"),
         api.get<BudgetDto[]>("/api/budgets"),
         api.get<GoalDto[]>("/api/goals"),
+        api.get<{ alerts: AlertDto[] }>("/api/alerts"),
+        api.get<MonthCompareDto>("/api/transactions/compare"),
+        api.get<AccountsDto>("/api/accounts"),
       ]);
       setSummary(summaryRes.data);
       setCashFlow(cashFlowRes.data);
@@ -58,6 +81,9 @@ export default function DashboardClient() {
       setTransactionCount(statusRes.data.transactionCount ?? 0);
       setBudgets(budgetsRes.data);
       setGoals(goalsRes.data);
+      setAlerts(alertsRes.data.alerts || []);
+      setCompare(compareRes.data);
+      setAccounts(accountsRes.data);
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       setError(
@@ -98,10 +124,22 @@ export default function DashboardClient() {
 
         {!loading && (
           <>
+            <AlertsBanner alerts={alerts} onDismissed={load} />
+
             {showPlaidCard && !error && (
               <div className="mb-6">
                 <PlaidConnectCard connected={plaidConnected} onUpdated={load} />
               </div>
+            )}
+
+            {plaidConnected && !showPlaidCard && (
+              <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">
+                Bank connected. To reconnect or fix login errors, go to{" "}
+                <Link href="/settings" className="font-medium text-indigo-600 hover:underline dark:text-indigo-400">
+                  Settings
+                </Link>
+                .
+              </p>
             )}
 
             {summary && cashFlow && (
@@ -125,6 +163,8 @@ export default function DashboardClient() {
                   <StatCard title="Top category" value={summary.byCategory[0]?.category || "N/A"} />
                 </div>
 
+                {compare && <MonthCompareCard compare={compare} />}
+
                 <div className="grid gap-6 lg:grid-cols-3">
                   <div className="lg:col-span-2">
                     <SpendingChart />
@@ -136,6 +176,8 @@ export default function DashboardClient() {
                   <RecurringCard subscriptions={recurring} />
                   <GoalsCard goals={goals} onUpdated={load} />
                 </div>
+
+                <AccountsCard data={accounts} onUpdated={load} />
 
                 <div>
                   <div className="mb-3 flex items-center justify-between">

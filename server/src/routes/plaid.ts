@@ -2,6 +2,7 @@ import { Router } from "express";
 import { CountryCode, Products } from "plaid";
 import auth from "../middleware/auth";
 import User from "../models/User";
+import Account from "../models/Account";
 import Transaction from "../models/Transaction";
 import { getPlaidClient, plaidErrorMessage } from "../services/plaidClient";
 import { getUserAccessToken, setUserAccessToken, syncUserByItemId, syncUserTransactions } from "../services/plaidSync";
@@ -101,6 +102,10 @@ router.post("/disconnect", auth, async (req, res) => {
         },
       }
     );
+    const user = await User.findOne({ email: req.user!.email });
+    if (user) {
+      await Account.deleteMany({ userId: user._id });
+    }
     res.json({ success: true });
   } catch (error) {
     console.error("disconnect failed", error);

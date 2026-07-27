@@ -106,7 +106,17 @@ export default function SpendingChart() {
               />
               <YAxis tick={{ fontSize: 12 }} tickFormatter={(v) => `$${v}`} />
               <Tooltip
-                formatter={(v: number, name: string) => [`$${v.toFixed(2)}`, name === "spent" ? "Spent" : "Income"]}
+                formatter={(value, name) => {
+                  const n = Number(value);
+                  const key = String(name);
+                  const label =
+                    key === "spent" || key === "Spent"
+                      ? "Spent"
+                      : key === "income" || key === "Income"
+                        ? "Income"
+                        : key;
+                  return [`$${n.toFixed(2)}`, label];
+                }}
                 labelFormatter={(_, payload) => {
                   const point = payload?.[0]?.payload as { key?: string; label?: string } | undefined;
                   return point?.key || point?.label || "";

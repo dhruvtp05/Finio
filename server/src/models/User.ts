@@ -10,6 +10,8 @@ export interface IUser {
   plaidItemId?: string;
   plaidSyncCursor?: string;
   connectedAt?: Date;
+  /** Alert keys the user has dismissed (e.g. budget:abc:over) */
+  dismissedAlertKeys?: string[];
 }
 
 export interface IUserDocument extends IUser, Document {
@@ -28,6 +30,7 @@ const UserSchema = new Schema<IUserDocument>(
     plaidItemId: { type: String, index: true },
     plaidSyncCursor: { type: String, select: false },
     connectedAt: Date,
+    dismissedAlertKeys: { type: [String], default: [] },
   },
   { timestamps: true }
 );
