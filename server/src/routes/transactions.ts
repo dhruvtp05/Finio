@@ -10,6 +10,7 @@ import { detectRecurringSubscriptions } from "../utils/recurring";
 import { computeCashFlowMetrics } from "../utils/cashFlow";
 import { computeMonthCompare } from "../utils/monthCompare";
 import { computeNetWorthFromAccounts } from "../utils/netWorth";
+import { buildTaxExportRows } from "../utils/insights";
 
 const router = Router();
 
@@ -23,7 +24,10 @@ function monthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function buildQuery(userId: Types.ObjectId, params: { month?: string; category?: string; search?: string }) {
+function buildQuery(
+  userId: Types.ObjectId,
+  params: { month?: string; category?: string; search?: string; tag?: string }
+) {
   const query: Record<string, unknown> = { userId, excludedFromTotals: { $ne: true } };
 
   if (params.month && /^\d{4}-\d{2}$/.test(params.month)) {
@@ -46,9 +50,14 @@ function buildQuery(userId: Types.ObjectId, params: { month?: string; category?:
         $or: [
           { merchantName: { $regex: params.search, $options: "i" } },
           { name: { $regex: params.search, $options: "i" } },
+          { note: { $regex: params.search, $options: "i" } },
         ],
       },
     ];
+  }
+
+  if (params.tag?.trim()) {
+    query.tags = params.tag.trim().toLowerCase();
   }
 
   return query;
@@ -68,6 +77,10 @@ function toDto(txn: ITransactionDocument) {
     pending: txn.pending,
     source: txn.source || "plaid",
     note: txn.note,
+    tags: txn.tags || [],
+    isCreditCardPayment: Boolean(txn.isCreditCardPayment),
+    hasReceipt: Boolean(txn.receiptPath),
+    receiptUrl: txn.receiptPath ? `/uploads/${txn.receiptPath}` : undefined,
     excludedFromTotals: Boolean(txn.excludedFromTotals),
     splitFromId: txn.splitFromId?.toString(),
   };
@@ -79,19 +92,22 @@ router.get("/filters", auth, async (req, res) => {
     if (!user) return res.json({ months: [], categories: [] });
 
     const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select(
-      "date category userCategory suggestedCategory"
+      "date category userCategory suggestedCategory tags"
     );
     const months = new Set<string>();
     const categories = new Set<string>();
+    const tags = new Set<string>();
 
     txns.forEach((txn) => {
       months.add(monthKey(new Date(txn.date)));
       categories.add(effectiveCategory(txn));
+      (txn.tags || []).forEach((t) => tags.add(t));
     });
 
     res.json({
       months: Array.from(months).sort().reverse(),
       categories: Array.from(categories).sort(),
+      tags: Array.from(tags).sort(),
     });
   } catch (error) {
     console.error("filters failed", error);
@@ -126,6 +142,33 @@ router.get("/export", auth, async (req, res) => {
   } catch (error) {
     console.error("export failed", error);
     res.status(500).json({ error: "Failed to export transactions" });
+  }
+});
+
+router.get("/tax-export", auth, async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.user!.email });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const yearParam = typeof req.query.year === "string" ? Number(req.query.year) : new Date().getFullYear();
+    const year = Number.isFinite(yearParam) ? yearParam : new Date().getFullYear();
+
+    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } });
+    const rows = buildTaxExportRows(txns, year);
+    const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+
+    const header = "Tax Year,Category,Transaction Count,Total Spent\n";
+    const body = rows
+      .map((r) => `${year},"${r.category}",${r.count},${r.total.toFixed(2)}`)
+      .join("\n");
+    const footer = `\n${year},"TOTAL",,${grandTotal.toFixed(2)}\n`;
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="finio-tax-${year}.csv"`);
+    res.send(header + body + footer);
+  } catch (error) {
+    console.error("tax-export failed", error);
+    res.status(500).json({ error: "Failed to export tax summary" });
   }
 });
 
@@ -205,16 +248,38 @@ router.get("/cashflow", auth, async (req, res) => {
       });
     }
 
+    const startStr = typeof req.query.start === "string" ? req.query.start : undefined;
+    const endStr = typeof req.query.end === "string" ? req.query.end : undefined;
+    let range: { start?: Date; end?: Date } | undefined;
+    if (startStr && endStr) {
+      const start = new Date(startStr);
+      const end = new Date(endStr);
+      if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+        range = { start, end };
+      }
+    }
+
     const [txns, accounts] = await Promise.all([
-      Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select("amount date"),
+      Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }),
       Account.find({ userId: user._id }),
     ]);
 
-    const metrics = computeCashFlowMetrics(txns);
+    const mapped = txns.map((t) => ({
+      amount: t.amount,
+      date: t.date,
+      category: effectiveCategory(t),
+      isCreditCardPayment: t.isCreditCardPayment,
+    }));
+    const metrics = computeCashFlowMetrics(mapped, range);
     if (accounts.length) {
       const fromBalances = computeNetWorthFromAccounts(accounts);
       metrics.netWorth = fromBalances.netWorth;
-      return res.json({ ...metrics, netWorthSource: "accounts" as const, assets: fromBalances.assets, liabilities: fromBalances.liabilities });
+      return res.json({
+        ...metrics,
+        netWorthSource: "accounts" as const,
+        assets: fromBalances.assets,
+        liabilities: fromBalances.liabilities,
+      });
     }
 
     return res.json({ ...metrics, netWorthSource: "transactions" as const });
@@ -254,11 +319,14 @@ router.get("/summary", auth, async (req, res) => {
       const date = new Date(txn.date);
       const month = monthKey(date);
       const inCurrentMonth = date >= start && date < end;
+      const skipSpend = txn.isCreditCardPayment || category === "Transfers";
 
       if (txn.amount > 0) {
-        totalSpent += txn.amount;
-        if (inCurrentMonth) totalSpentThisMonth += txn.amount;
-        categoryMap.set(category, (categoryMap.get(category) || 0) + txn.amount);
+        if (!skipSpend) {
+          totalSpent += txn.amount;
+          if (inCurrentMonth) totalSpentThisMonth += txn.amount;
+          categoryMap.set(category, (categoryMap.get(category) || 0) + txn.amount);
+        }
       } else {
         const income = Math.abs(txn.amount);
         totalIncome += income;
@@ -266,8 +334,8 @@ router.get("/summary", auth, async (req, res) => {
       }
 
       const current = monthMap.get(month) || { month, spent: 0, income: 0 };
-      if (txn.amount > 0) current.spent += txn.amount;
-      else current.income += Math.abs(txn.amount);
+      if (txn.amount > 0 && !skipSpend) current.spent += txn.amount;
+      else if (txn.amount < 0) current.income += Math.abs(txn.amount);
       monthMap.set(month, current);
     });
 
@@ -363,6 +431,84 @@ router.patch("/:id/category", auth, async (req, res) => {
   }
 });
 
+router.patch("/:id/meta", auth, async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.user!.email });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const { note, tags, isCreditCardPayment } = req.body as {
+      note?: string;
+      tags?: string[];
+      isCreditCardPayment?: boolean;
+    };
+
+    const updates: Record<string, unknown> = {};
+    if (note !== undefined) updates.note = String(note).slice(0, 500);
+    if (tags !== undefined) {
+      updates.tags = tags
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 10);
+    }
+    if (typeof isCreditCardPayment === "boolean") updates.isCreditCardPayment = isCreditCardPayment;
+
+    const txn = await Transaction.findOneAndUpdate(
+      { _id: req.params.id, userId: user._id, excludedFromTotals: { $ne: true } },
+      updates,
+      { new: true }
+    );
+    if (!txn) return res.status(404).json({ error: "Transaction not found" });
+    res.json(toDto(txn));
+  } catch (error) {
+    console.error("meta patch failed", error);
+    res.status(500).json({ error: "Failed to update transaction" });
+  }
+});
+
+router.post("/:id/receipt", auth, async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.user!.email });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const { dataUrl, mime } = req.body as { dataUrl?: string; mime?: string };
+    if (!dataUrl?.startsWith("data:") || !dataUrl.includes("base64,")) {
+      return res.status(400).json({ error: "dataUrl (base64) required" });
+    }
+
+    const txn = await Transaction.findOne({
+      _id: req.params.id,
+      userId: user._id,
+      excludedFromTotals: { $ne: true },
+    });
+    if (!txn) return res.status(404).json({ error: "Transaction not found" });
+
+    const [, b64] = dataUrl.split("base64,");
+    const buf = Buffer.from(b64, "base64");
+    if (buf.length > 4 * 1024 * 1024) {
+      return res.status(400).json({ error: "Receipt must be under 4MB" });
+    }
+
+    const fs = await import("fs");
+    const pathMod = await import("path");
+    const uploadsRoot = pathMod.join(__dirname, "..", "uploads");
+    const userDir = pathMod.join(uploadsRoot, user._id.toString());
+    if (!fs.existsSync(userDir)) fs.mkdirSync(userDir, { recursive: true });
+
+    const mimeType = mime || "image/jpeg";
+    const ext = mimeType.includes("png") ? "png" : mimeType.includes("pdf") ? "pdf" : "jpg";
+    const filename = `${txn._id.toString()}.${ext}`;
+    fs.writeFileSync(pathMod.join(userDir, filename), buf);
+
+    txn.receiptPath = `${user._id.toString()}/${filename}`;
+    txn.receiptMime = mimeType;
+    await txn.save();
+    res.json(toDto(txn));
+  } catch (error) {
+    console.error("receipt upload failed", error);
+    res.status(500).json({ error: "Failed to upload receipt" });
+  }
+});
+
 router.post("/:id/split", auth, async (req, res) => {
   try {
     const user = await User.findOne({ email: req.user!.email });
@@ -448,13 +594,14 @@ router.get("/", auth, async (req, res) => {
     const month = typeof req.query.month === "string" ? req.query.month : undefined;
     const category = typeof req.query.category === "string" ? req.query.category : undefined;
     const search = typeof req.query.search === "string" ? req.query.search : undefined;
+    const tag = typeof req.query.tag === "string" ? req.query.tag : undefined;
     const limit = Math.min(Number(req.query.limit || 25), 100);
     const page = Math.max(Number(req.query.page || 1), 1);
 
     const user = await User.findOne({ email: req.user!.email });
     if (!user) return res.json({ transactions: [], total: 0, page, limit, totalPages: 0 });
 
-    const query = buildQuery(user._id, { month, category, search });
+    const query = buildQuery(user._id, { month, category, search, tag });
     const [transactions, total] = await Promise.all([
       Transaction.find(query)
         .sort({ date: -1 })

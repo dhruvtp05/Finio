@@ -14,6 +14,7 @@ export default function TransactionsClient() {
   const [allCategories, setAllCategories] = useState<string[]>([]);
   const [month, setMonth] = useState("");
   const [category, setCategory] = useState("");
+  const [tag, setTag] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
@@ -41,6 +42,7 @@ export default function TransactionsClient() {
       const params = new URLSearchParams({ page: String(page), limit: "20" });
       if (month) params.set("month", month);
       if (category) params.set("category", category);
+      if (tag) params.set("tag", tag);
       if (search) params.set("search", search);
 
       const res = await api.get<{
@@ -55,7 +57,7 @@ export default function TransactionsClient() {
     } finally {
       setLoading(false);
     }
-  }, [page, month, category, search]);
+  }, [page, month, category, tag, search]);
 
   useEffect(() => {
     loadFilters().catch(() => undefined);
@@ -69,6 +71,7 @@ export default function TransactionsClient() {
     const params = new URLSearchParams();
     if (month) params.set("month", month);
     if (category) params.set("category", category);
+    if (tag) params.set("tag", tag);
     if (search) params.set("search", search);
 
     const res = await api.get(`/api/transactions/export?${params.toString()}`, { responseType: "blob" });
@@ -109,6 +112,31 @@ export default function TransactionsClient() {
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       toast.error(msg || "Split failed");
+    }
+  };
+
+  const updateMeta = async (
+    id: string,
+    meta: { note?: string; tags?: string[]; isCreditCardPayment?: boolean }
+  ) => {
+    try {
+      await api.patch(`/api/transactions/${id}/meta`, meta);
+      toast.success("Transaction updated");
+      loadFilters();
+      load();
+    } catch {
+      toast.error("Failed to update transaction");
+    }
+  };
+
+  const uploadReceipt = async (id: string, dataUrl: string, mime: string) => {
+    try {
+      await api.post(`/api/transactions/${id}/receipt`, { dataUrl, mime });
+      toast.success("Receipt uploaded");
+      load();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      toast.error(msg || "Receipt upload failed");
     }
   };
 
@@ -156,6 +184,15 @@ export default function TransactionsClient() {
               <option value="">All categories</option>
               {allCategories.map((c) => (
                 <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Tag</label>
+            <select className="finio-input" value={tag} onChange={(e) => { setPage(1); setTag(e.target.value); }}>
+              <option value="">All tags</option>
+              {(filters.tags || []).map((t) => (
+                <option key={t} value={t}>{t}</option>
               ))}
             </select>
           </div>
@@ -207,6 +244,8 @@ export default function TransactionsClient() {
             onRecategorize={recategorize}
             onDelete={deleteTxn}
             onSplit={splitTxn}
+            onUpdateMeta={updateMeta}
+            onUploadReceipt={uploadReceipt}
           />
           <div className="mt-4 flex items-center justify-between">
             <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="finio-btn-secondary">

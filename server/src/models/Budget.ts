@@ -5,6 +5,8 @@ export interface IBudget {
   category: string;
   label: string;
   limit: number;
+  /** Unused prior-month budget adds to this month's effective limit */
+  rolloverEnabled?: boolean;
 }
 
 export interface IBudgetDocument extends IBudget, Document {
@@ -19,6 +21,7 @@ const BudgetSchema = new Schema<IBudgetDocument>(
     category: { type: String, required: true },
     label: { type: String, required: true },
     limit: { type: Number, required: true, min: 0 },
+    rolloverEnabled: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

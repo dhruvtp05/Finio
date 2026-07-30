@@ -7,16 +7,32 @@ import { effectiveCategory, isFinioCategory } from "../services/categorization";
 
 const router = Router();
 
-function getMonthRange(date = new Date()) {
-  const start = new Date(date.getFullYear(), date.getMonth(), 1);
-  const end = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+function getMonthRange(offsetMonths = 0, date = new Date()) {
+  const start = new Date(date.getFullYear(), date.getMonth() + offsetMonths, 1);
+  const end = new Date(date.getFullYear(), date.getMonth() + offsetMonths + 1, 1);
   return { start, end };
+}
+
+function spentMapForRange(
+  txns: Array<{ amount: number; date: Date; excludedFromTotals?: boolean; userCategory?: string; suggestedCategory?: string; category?: string[] }>,
+  start: Date,
+  end: Date
+) {
+  const map = new Map<string, number>();
+  txns.forEach((txn) => {
+    if (txn.excludedFromTotals || txn.amount <= 0) return;
+    const d = new Date(txn.date);
+    if (d < start || d >= end) return;
+    const cat = effectiveCategory(txn as Parameters<typeof effectiveCategory>[0]);
+    map.set(cat, (map.get(cat) || 0) + txn.amount);
+  });
+  return map;
 }
 
 async function ensureDefaultBudgets(userId: IUserDocument["_id"]) {
   const count = await Budget.countDocuments({ userId });
   if (count > 0) return;
-  await Budget.insertMany(DEFAULT_BUDGETS.map((b) => ({ ...b, userId })));
+  await Budget.insertMany(DEFAULT_BUDGETS.map((b) => ({ ...b, userId, rolloverEnabled: true })));
 }
 
 router.get("/", auth, async (req, res) => {
@@ -27,27 +43,36 @@ router.get("/", auth, async (req, res) => {
     await ensureDefaultBudgets(user._id);
 
     const budgets = await Budget.find({ userId: user._id }).sort({ label: 1 });
-    const { start, end } = getMonthRange();
+    const { start, end } = getMonthRange(0);
+    const prev = getMonthRange(-1);
+
     const txns = await Transaction.find({
       userId: user._id,
-      date: { $gte: start, $lt: end },
+      date: { $gte: prev.start, $lt: end },
       excludedFromTotals: { $ne: true },
     });
 
-    const spentByCategory = new Map<string, number>();
-    txns.forEach((txn) => {
-      if (txn.amount <= 0) return;
-      const cat = effectiveCategory(txn);
-      spentByCategory.set(cat, (spentByCategory.get(cat) || 0) + txn.amount);
-    });
+    const thisMonth = spentMapForRange(txns, start, end);
+    const lastMonth = spentMapForRange(txns, prev.start, prev.end);
 
-    const result = budgets.map((budget) => ({
-      _id: budget._id.toString(),
-      category: budget.category,
-      label: budget.label,
-      limit: budget.limit,
-      spent: spentByCategory.get(budget.category) || 0,
-    }));
+    const result = budgets.map((budget) => {
+      const spent = thisMonth.get(budget.category) || 0;
+      const lastSpent = lastMonth.get(budget.category) || 0;
+      const rolloverEnabled = budget.rolloverEnabled !== false;
+      const rolloverAmount = rolloverEnabled ? Math.max(0, Math.round((budget.limit - lastSpent) * 100) / 100) : 0;
+      const effectiveLimit = Math.round((budget.limit + rolloverAmount) * 100) / 100;
+
+      return {
+        _id: budget._id.toString(),
+        category: budget.category,
+        label: budget.label,
+        limit: budget.limit,
+        spent,
+        rolloverEnabled,
+        rolloverAmount,
+        effectiveLimit,
+      };
+    });
 
     res.json(result);
   } catch (error) {
@@ -61,7 +86,12 @@ router.post("/", auth, async (req, res) => {
     const user = await User.findOne({ email: req.user!.email });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const { category, label, limit } = req.body as { category?: string; label?: string; limit?: number };
+    const { category, label, limit, rolloverEnabled } = req.body as {
+      category?: string;
+      label?: string;
+      limit?: number;
+      rolloverEnabled?: boolean;
+    };
     if (!category?.trim() || !label?.trim() || typeof limit !== "number" || limit < 0) {
       return res.status(400).json({ error: "category, label, and limit are required" });
     }
@@ -69,13 +99,22 @@ router.post("/", auth, async (req, res) => {
       return res.status(400).json({ error: "Invalid category" });
     }
 
-    const budget = await Budget.create({ userId: user._id, category: category.trim(), label: label.trim(), limit });
+    const budget = await Budget.create({
+      userId: user._id,
+      category: category.trim(),
+      label: label.trim(),
+      limit,
+      rolloverEnabled: rolloverEnabled !== false,
+    });
     res.status(201).json({
       _id: budget._id.toString(),
       category: budget.category,
       label: budget.label,
       limit: budget.limit,
       spent: 0,
+      rolloverEnabled: budget.rolloverEnabled !== false,
+      rolloverAmount: 0,
+      effectiveLimit: budget.limit,
     });
   } catch (error) {
     console.error("budgets POST failed", error);
@@ -88,7 +127,12 @@ router.put("/:id", auth, async (req, res) => {
     const user = await User.findOne({ email: req.user!.email });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const { label, limit, category } = req.body as { label?: string; limit?: number; category?: string };
+    const { label, limit, category, rolloverEnabled } = req.body as {
+      label?: string;
+      limit?: number;
+      category?: string;
+      rolloverEnabled?: boolean;
+    };
     if (category !== undefined && !isFinioCategory(category)) {
       return res.status(400).json({ error: "Invalid category" });
     }
@@ -99,6 +143,7 @@ router.put("/:id", auth, async (req, res) => {
         ...(label !== undefined ? { label } : {}),
         ...(category !== undefined ? { category } : {}),
         ...(typeof limit === "number" ? { limit } : {}),
+        ...(typeof rolloverEnabled === "boolean" ? { rolloverEnabled } : {}),
       },
       { new: true }
     );
@@ -110,6 +155,9 @@ router.put("/:id", auth, async (req, res) => {
       label: budget.label,
       limit: budget.limit,
       spent: 0,
+      rolloverEnabled: budget.rolloverEnabled !== false,
+      rolloverAmount: 0,
+      effectiveLimit: budget.limit,
     });
   } catch (error) {
     console.error("budgets PUT failed", error);

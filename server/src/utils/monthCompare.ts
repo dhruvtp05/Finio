@@ -63,6 +63,7 @@ function metricsForPeriod(
 
   txns.forEach((txn) => {
     if (txn.excludedFromTotals) return;
+    if (txn.category === "Transfers") return;
     const date = new Date(txn.date);
     if (date < start || date >= end) return;
     if (txn.amount > 0) {

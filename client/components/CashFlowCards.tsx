@@ -8,44 +8,39 @@ function pct(n: number | null) {
   return `${n.toFixed(1)}%`;
 }
 
-export default function CashFlowCards({ cashFlow }: { cashFlow: CashFlowDto }) {
+export default function CashFlowCards({
+  cashFlow,
+  customRange = false,
+}: {
+  cashFlow: CashFlowDto;
+  customRange?: boolean;
+}) {
   const netPositive = cashFlow.netThisMonth >= 0;
+  const rangeHint = customRange ? "In range" : "This month";
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
-        title="Money in (this month)"
+        title="Money in"
         value={`$${cashFlow.moneyInThisMonth.toFixed(2)}`}
-        hint="Deposits & income"
+        hint={rangeHint}
         valueClassName="text-emerald-600 dark:text-emerald-400"
       />
       <StatCard
-        title="Money out (this month)"
+        title="Money out"
         value={`$${cashFlow.moneyOutThisMonth.toFixed(2)}`}
-        hint="Spending & bills"
-        valueClassName="text-slate-900 dark:text-slate-100"
+        hint={rangeHint}
       />
       <StatCard
         title="Savings rate"
         value={pct(cashFlow.savingsRatePercent)}
-        hint={`Net ${netPositive ? "+" : ""}$${cashFlow.netThisMonth.toFixed(2)} this month`}
+        hint={`Net ${netPositive ? "+" : ""}$${cashFlow.netThisMonth.toFixed(2)}`}
         valueClassName={netPositive ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}
       />
       <StatCard
         title="Avg daily spend"
         value={`$${cashFlow.avgDailySpend.toFixed(2)}`}
-        hint={`Day ${cashFlow.daysElapsedInMonth} of month`}
-      />
-      <StatCard
-        title="Net worth"
-        value={`$${cashFlow.netWorth.toFixed(2)}`}
-        hint={
-          cashFlow.netWorthSource === "accounts"
-            ? `Assets $${(cashFlow.assets ?? 0).toFixed(0)} − liabilities $${(cashFlow.liabilities ?? 0).toFixed(0)}`
-            : "Lifetime income minus spending (connect Plaid for live balances)"
-        }
-        className="sm:col-span-2 lg:col-span-4"
-        valueClassName={cashFlow.netWorth >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}
+        hint={customRange ? rangeHint : `Day ${cashFlow.daysElapsedInMonth}`}
       />
     </div>
   );

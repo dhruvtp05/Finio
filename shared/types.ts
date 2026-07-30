@@ -20,6 +20,10 @@ export interface TransactionDto {
   pending?: boolean;
   source?: "plaid" | "manual";
   note?: string;
+  tags?: string[];
+  isCreditCardPayment?: boolean;
+  hasReceipt?: boolean;
+  receiptUrl?: string;
   excludedFromTotals?: boolean;
   splitFromId?: string;
 }
@@ -30,6 +34,9 @@ export interface BudgetDto {
   label: string;
   limit: number;
   spent: number;
+  rolloverEnabled?: boolean;
+  rolloverAmount?: number;
+  effectiveLimit?: number;
 }
 
 export interface PlaidStatusDto {
@@ -40,6 +47,7 @@ export interface PlaidStatusDto {
 export interface TransactionFiltersDto {
   months: string[];
   categories: string[];
+  tags?: string[];
 }
 
 export interface PaginatedTransactions {
@@ -82,6 +90,8 @@ export interface CashFlowDto {
   netWorthSource?: "accounts" | "transactions";
   assets?: number;
   liabilities?: number;
+  rangeStart?: string;
+  rangeEnd?: string;
 }
 
 export type RecurringCadence = "monthly" | "weekly" | "annual";
@@ -110,8 +120,51 @@ export interface GoalDto {
   deadline: string;
   createdAt: string;
   saved: number;
+  fromCashFlow?: number;
+  fromContributions?: number;
   progressPercent: number;
   completed: boolean;
+  contributions?: Array<{ _id: string; amount: number; date: string; note?: string }>;
+}
+
+export interface CategoryRuleDto {
+  _id: string;
+  pattern: string;
+  match: "contains" | "exact";
+  category: string;
+  enabled: boolean;
+}
+
+export interface BillCalendarItemDto {
+  merchantName: string;
+  category: string;
+  amount: number;
+  dueDate: string;
+  cadence: string;
+  merchantKey: string;
+}
+
+export interface RunwayDto {
+  liquidAssets: number;
+  avgMonthlySpend: number;
+  avgMonthlyIncome: number;
+  avgMonthlyNet: number;
+  runwayMonths: number | null;
+  monthlyBurn: number;
+  cancelledMonthlySavings: number;
+  projectedRunwayMonths: number | null;
+  subscriptions: Array<{
+    merchantKey: string;
+    merchantName: string;
+    monthlyCost: number;
+    yearlyCost: number;
+  }>;
+}
+
+export interface HeatmapDto {
+  byDayOfWeek: Array<{ day: string; dayIndex: number; spent: number; count: number }>;
+  byMerchant: Array<{ merchant: string; spent: number }>;
+  daysBack: number;
 }
 
 export type AlertSeverity = "info" | "warn" | "critical";
@@ -186,4 +239,29 @@ export interface MonthCompareDto {
     incomeDeltaPercent: number | null;
     netDelta: number;
   };
+}
+
+export interface WeeklyDigestDto {
+  weekLabel: string;
+  thisWeek: { spent: number; income: number; net: number };
+  lastWeek: { spent: number; income: number; net: number };
+  spentDelta: number;
+  spentDeltaPercent: number | null;
+  topMerchants: Array<{ name: string; total: number }>;
+  budgetWarnings: Array<{ label: string; pct: number }>;
+  highlights: string[];
+}
+
+export interface MerchantInsightDto {
+  merchantKey: string;
+  merchantName: string;
+  total: number;
+  count: number;
+  lastDate: string;
+  category: string;
+}
+
+export interface MerchantsInsightsResponse {
+  year: number;
+  merchants: MerchantInsightDto[];
 }

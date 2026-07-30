@@ -1,4 +1,4 @@
-# 💰 Finio
+# Finio
 
 ![Next.js](https://img.shields.io/badge/Next.js-black?style=flat-square&logo=next.js&logoColor=white)
 ![React](https://img.shields.io/badge/React-20232A?style=flat-square&logo=react&logoColor=61DAFB)
@@ -8,136 +8,174 @@
 ![Plaid](https://img.shields.io/badge/Plaid-111111?style=flat-square&logo=plaid&logoColor=white)
 ![Tailwind CSS](https://img.shields.io/badge/Tailwind-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
 
-> **Finio** is a personal finance dashboard that turns bank transactions into clarity. Connect your account via Plaid, track budgets and savings goals, spot recurring subscriptions from your own history, and see cash flow at a glance — with optional dark mode for late-night money check-ins.
+> **Finio** is a personal finance dashboard that turns bank transactions into clarity. Connect accounts via Plaid sandbox, track budgets and goals, spot subscriptions, and dig into cash flow, net worth, and spending insights.
 
 ---
 
-##  Features
+## Features
 
-*  **Google Sign-In** Secure authentication with NextAuth — no passwords to manage.
-*  **Plaid Bank Sync** Link a sandbox bank, sync transactions automatically (webhooks + manual refresh), with encrypted access tokens at rest.
-*  **Cash Flow Dashboard** Money in vs money out this month, savings rate %, average daily spend, and lifetime net position — all computed from data you already have.
-*  **Recurring & Subscriptions** Detects merchants that repeat monthly or weekly (Netflix, gym, etc.) from transaction patterns — no subscription APIs required.
-*  **Savings Goals** Set targets like “Save $2,000 by December” with progress bars driven by income minus spending since the goal was created.
-*  **Budgets & Charts** Editable category budgets with progress bars, spending timeline charts (daily / weekly / monthly / yearly), and category breakdowns.
-*  **Dark Mode** Toggle in the nav bar; preference persists in local storage.
-*  **CSV Export** Download filtered transactions for spreadsheets or tax prep.
+### Core
+* **Google Sign-In** — NextAuth OAuth (no passwords).
+* **Plaid bank sync** — Link sandbox banks, sync transactions (webhooks + manual refresh), encrypted access tokens at rest.
+* **Cash flow dashboard** — Money in/out, savings rate, avg daily spend; optional custom date range. Transfers and credit-card payments are excluded from spend so rates stay sane.
+* **Budgets** — Category limits with progress bars and **month-to-month rollover** of unused budget.
+* **Savings goals** — Targets with progress from cash flow **plus manual contributions**.
+* **Spending charts** — Daily / weekly / monthly / yearly timeline (spent vs income).
+* **Dark mode** — Persisted in local storage.
+* **CSV export** — Filtered transactions or **tax-year category summary**.
+
+### Insights (`/insights`)
+* Weekly spending digest (vs last week, highlights, top merchants).
+* Merchant spend search (“You spent $X at …”).
+* Month comparison (vs last month / same month last year).
+* Recurring / subscriptions (weekly, monthly, annual) with yearly cost.
+* Bill calendar (upcoming charges from recurring patterns).
+* Runway / what-if (cancel subscriptions → projected months of runway).
+* Spending heatmap (day-of-week + top merchants).
+* Accounts & net worth chart (from Plaid balances + snapshots).
+
+### Transactions & automation
+* Manual entries, split transactions, locked categories (survive Plaid sync).
+* Notes, tags, receipt upload.
+* **Category rules** (e.g. “Amazon → Shopping”) applied on sync — manage in Settings.
+* Credit-card payment detection (auto + manual toggle) to avoid double-counting.
+
+### Settings
+* Reconnect / disconnect Plaid.
+* Category rules CRUD + “Apply all”.
+* Email weekly digest (requires SMTP — see below).
 
 ---
 
-##  Quick Start
-
-Get up and running locally in just a few steps:
+## Quick start
 
 ```bash
-# From the Finio directory
 cd Finio
-
-# Install dependencies (client + server workspaces)
 npm install
 
-# Copy environment templates
 cp client/.env.example client/.env.local
 cp server/.env.example server/.env
 
-# Start backend (port 5000) and frontend (port 3000) in separate terminals
+# Terminal 1
 npm run dev:server
+
+# Terminal 2
 npm run dev:client
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser. Sign in with Google, connect a Plaid sandbox bank, and explore the dashboard.
+Open [http://localhost:3000](http://localhost:3000). Sign in with Google, connect a Plaid sandbox bank (`user_good` / `pass_good`), then explore Dashboard, Insights, Transactions, and Settings.
 
 ---
 
-##  Configuration & API Keys
+## Configuration
 
-The app needs Google OAuth, MongoDB, Plaid sandbox credentials, and a shared JWT secret. Create `client/.env.local` and `server/.env` from the examples.
+Create `client/.env.local` and `server/.env` from the examples.
 
-**Example `server/.env`:**
+**`server/.env` (required):**
 
 ```env
-# ==========================================
-# FINIO Server Environment
-# ==========================================
-
 PORT=5000
 CLIENT_URL=http://localhost:3000
 MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/finio
-
-# Must match client NEXTAUTH_SECRET
 NEXTAUTH_SECRET=your-long-random-secret
 
-# Plaid Sandbox — https://dashboard.plaid.com/
 PLAID_CLIENT_ID=your_plaid_client_id
 PLAID_SECRET=your_plaid_sandbox_secret
 PLAID_ENV=sandbox
-
-# Optional: encrypt Plaid tokens (falls back to NEXTAUTH_SECRET)
-TOKEN_ENCRYPTION_KEY=another-long-random-secret
-
-# Optional: Plaid webhooks (use ngrok locally)
-PLAID_WEBHOOK_URL=https://your-ngrok-url.ngrok.io/api/plaid/webhook
 ```
 
-**Example `client/.env.local`:**
+**`server/.env` (optional):**
 
 ```env
-# ==========================================
-# FINIO Client Environment
-# ==========================================
+TOKEN_ENCRYPTION_KEY=another-long-random-secret
+PLAID_WEBHOOK_URL=https://your-ngrok-url.ngrok.io/api/plaid/webhook
 
+# Weekly digest email (Settings → Email weekly digest)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASS=your_app_password
+SMTP_FROM=Finio <you@gmail.com>
+```
+
+**`client/.env.local`:**
+
+```env
 NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=your-long-random-secret
-
-GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-google-client-secret
-
+GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
 NEXT_PUBLIC_API_URL=http://localhost:5000
 ```
 
 ### Setup notes
 
-* **Google OAuth:** Create credentials in [Google Cloud Console](https://console.cloud.google.com/). Add `http://localhost:3000/api/auth/callback/google` as an authorized redirect URI.
-* **MongoDB:** Use Atlas free tier or a local instance; the app creates collections on first use.
-* **Plaid sandbox:** Use `user_good` / `pass_good` when linking any sandbox institution.
-* **NEXTAUTH_SECRET:** Must be identical in client and server so API JWT verification works.
+* **Google OAuth:** [Google Cloud Console](https://console.cloud.google.com/) — redirect URI `http://localhost:3000/api/auth/callback/google`.
+* **MongoDB:** Atlas free tier or local; collections are created on first use.
+* **Plaid sandbox:** any institution + `user_good` / `pass_good`.
+* **NEXTAUTH_SECRET:** must be identical in client and server.
 
 ---
 
-##  Tech Stack
+## Email digests (SMTP)
 
-* **Framework:** Next.js (App Router)
-* **UI:** React, Tailwind CSS, Recharts, Sonner toasts
-* **Backend:** Express.js, TypeScript, Mongoose
-* **Database:** MongoDB
-* **Auth:** NextAuth.js (Google OAuth) + JWT for API
-* **Finance:** Plaid (transaction sync)
+Digest email is **optional**. Without SMTP, Insights still shows the weekly digest in-app; Settings → “Email weekly digest” returns a clear “SMTP not configured” message.
 
----
+### Gmail (easiest for local/dev)
 
-##  System design
+1. Turn on [2-Step Verification](https://myaccount.google.com/security) for the Google account.
+2. Create an [App Password](https://myaccount.google.com/apppasswords) (App = Mail).
+3. Add to `server/.env`:
 
-For architecture, data models, and how recurring detection / goals / cash flow work under the hood, see **[SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md)**.
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your.email@gmail.com
+SMTP_PASS=abcd efgh ijkl mnop
+SMTP_FROM=Finio <your.email@gmail.com>
+```
 
----
+4. Restart the API server.
+5. Open **Settings** → **Email weekly digest**. Mail goes to the signed-in Google account email.
 
-##  Plaid sandbox tips
+### Other providers
 
-* Pick any sandbox bank in Link; credentials are `user_good` / `pass_good`.
-* For automatic re-sync via webhooks, expose port 5000 with ngrok and set `PLAID_WEBHOOK_URL`.
-* Production Plaid requires approval for live financial institutions.
-
----
-
-##  Deploy
-
-* **Client:** Vercel — set all `client/.env` vars and production Google redirect URI.
-* **Server:** Render, Railway, or similar — set `server/.env`, allow CORS to your Vercel URL, register webhook URL in Plaid.
+Use that provider’s SMTP host/port and credentials (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`). Set `SMTP_SECURE=true` if the provider requires TLS on port 465.
 
 ---
 
-##  Security
+## Tech stack
+
+* **Client:** Next.js (App Router), React, Tailwind, Recharts, Sonner
+* **Server:** Express, TypeScript, Mongoose
+* **DB:** MongoDB
+* **Auth:** NextAuth (Google) + JWT for API
+* **Finance:** Plaid (transactions + account balances)
+
+Architecture details: **[SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md)**.
+
+---
+
+## Plaid sandbox tips
+
+* Credentials: `user_good` / `pass_good`.
+* Webhooks: ngrok → port 5000, set `PLAID_WEBHOOK_URL` to `…/api/plaid/webhook`.
+* If balances fail with `ITEM_LOGIN_REQUIRED`, reconnect under **Settings**.
+* Live banks need Plaid Development/Production approval — sandbox is enough for demos.
+
+---
+
+## Deploy (when you have a domain)
+
+* **Client:** Vercel — set env vars; Google redirect = `https://your-domain/api/auth/callback/google`.
+* **Server:** Render/Railway — match `NEXTAUTH_SECRET`, set `CLIENT_URL` to the frontend origin, register Plaid webhook URL.
+* Prefer waiting until you have a stable custom domain so OAuth/CORS/webhook URLs don’t churn.
+
+---
+
+## Security
 
 * Never commit `.env` files.
 * Rotate secrets if exposed.
-* Plaid access tokens are encrypted before storage.
+* Plaid access tokens are encrypted at rest (AES-256-GCM).
+* Receipt uploads are stored under `server/uploads/` (gitignored).

@@ -211,7 +211,10 @@ Buckets transactions by period key (`utils/spendingTimeline.ts`), returns `{ lab
 
 ## Extension ideas
 
-- True net worth: manual asset/liability accounts
-- Smarter recurring: fuzzy merchant clustering, annual cadence
-- Goal contributions: allocate net only since goal start per account
-- Notifications when budget or goal thresholds crossed
+Many earlier ideas are now implemented (net worth from balances, annual recurring, goal contributions, budget/goal alerts, insights, rules, runway, receipts). Remaining stretch ideas:
+
+- Plaid Link update mode (re-auth without full disconnect)
+- Account / data deletion for the signed-in user
+- Scheduled digest cron (currently on-demand from Settings)
+- Household / shared budgets
+- Plaid Investments product

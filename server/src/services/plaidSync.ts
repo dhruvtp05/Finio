@@ -1,10 +1,12 @@
 import { Types } from "mongoose";
 import Account from "../models/Account";
+import CategoryRule from "../models/CategoryRule";
 import NetWorthSnapshot from "../models/NetWorthSnapshot";
 import Transaction from "../models/Transaction";
 import User, { IUserDocument } from "../models/User";
 import { decryptSecret, encryptSecret } from "../utils/crypto";
 import { computeNetWorthFromAccounts } from "../utils/netWorth";
+import { looksLikeCreditCardPayment, matchCategoryRule } from "../utils/rules";
 import { normalizeToFinioCategory } from "./categorization";
 import { getPlaidClient } from "./plaidClient";
 
@@ -36,6 +38,13 @@ export async function setUserAccessToken(user: IUserDocument, accessToken: strin
 
 function txnToUpsert(userId: Types.ObjectId, txn: PlaidTxn) {
   const suggestedCategory = normalizeToFinioCategory(txn.merchant_name, txn.name, txn.category || undefined);
+  const isCreditCardPayment = looksLikeCreditCardPayment({
+    name: txn.name,
+    merchantName: txn.merchant_name || undefined,
+    category: txn.category || undefined,
+    suggestedCategory,
+    amount: txn.amount,
+  });
   return {
     updateOne: {
       filter: { plaidTransactionId: txn.transaction_id },
@@ -51,15 +60,43 @@ function txnToUpsert(userId: Types.ObjectId, txn: PlaidTxn) {
           merchantName: txn.merchant_name ?? undefined,
           pending: txn.pending ?? undefined,
           source: "plaid",
+          isCreditCardPayment,
         },
         $setOnInsert: {
           categoryLocked: false,
           excludedFromTotals: false,
+          tags: [],
         },
       },
       upsert: true,
     },
   };
+}
+
+/** Apply user category rules to unlocked transactions */
+export async function applyRulesToUser(userId: Types.ObjectId): Promise<number> {
+  const rules = await CategoryRule.find({ userId, enabled: true });
+  if (!rules.length) return 0;
+
+  const txns = await Transaction.find({
+    userId,
+    excludedFromTotals: { $ne: true },
+    $or: [{ categoryLocked: { $ne: true } }, { categoryLocked: { $exists: false } }],
+  });
+
+  const ops = [];
+  for (const t of txns) {
+    const cat = matchCategoryRule(t.merchantName, t.name, rules);
+    if (!cat || t.userCategory === cat) continue;
+    ops.push({
+      updateOne: {
+        filter: { _id: t._id },
+        update: { $set: { userCategory: cat, categoryLocked: true } },
+      },
+    });
+  }
+  if (ops.length) await Transaction.bulkWrite(ops as Parameters<typeof Transaction.bulkWrite>[0]);
+  return ops.length;
 }
 
 export async function syncUserAccounts(user: IUserDocument): Promise<number> {
@@ -169,6 +206,12 @@ export async function syncUserTransactions(user: IUserDocument): Promise<number>
 
   user.plaidSyncCursor = cursor;
   await user.save();
+
+  try {
+    await applyRulesToUser(user._id);
+  } catch (err) {
+    console.warn("Category rules apply failed", err);
+  }
 
   try {
     await syncUserAccounts(user);

@@ -6,15 +6,26 @@ export interface CashFlowMetrics {
   avgDailySpend: number;
   netWorth: number;
   daysElapsedInMonth: number;
+  rangeStart?: string;
+  rangeEnd?: string;
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
+function shouldSkipSpend(txn: { category?: string; isCreditCardPayment?: boolean }) {
+  return Boolean(txn.isCreditCardPayment || txn.category === "Transfers" || txn.category === "Income");
 }
 
 export function computeCashFlowMetrics(
-  txns: Array<{ amount: number; date: Date }>,
-  now = new Date()
+  txns: Array<{ amount: number; date: Date; category?: string; isCreditCardPayment?: boolean }>,
+  opts?: { start?: Date; end?: Date; now?: Date }
 ): CashFlowMetrics {
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const daysElapsed = Math.max(now.getDate(), 1);
+  const now = opts?.now || new Date();
+  const start = opts?.start || new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = opts?.end || new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const daysElapsed = Math.max(1, Math.ceil((Math.min(now.getTime(), end.getTime()) - start.getTime()) / (1000 * 60 * 60 * 24)));
 
   let moneyInThisMonth = 0;
   let moneyOutThisMonth = 0;
@@ -23,15 +34,16 @@ export function computeCashFlowMetrics(
 
   txns.forEach((txn) => {
     const date = new Date(txn.date);
-    const inMonth = date >= start && date < end;
+    const inRange = date >= start && date < end;
 
     if (txn.amount > 0) {
+      if (shouldSkipSpend(txn)) return;
       totalSpent += txn.amount;
-      if (inMonth) moneyOutThisMonth += txn.amount;
+      if (inRange) moneyOutThisMonth += txn.amount;
     } else {
       const income = Math.abs(txn.amount);
       totalIncome += income;
-      if (inMonth) moneyInThisMonth += income;
+      if (inRange) moneyInThisMonth += income;
     }
   });
 
@@ -49,15 +61,13 @@ export function computeCashFlowMetrics(
     avgDailySpend: round2(avgDailySpend),
     netWorth: round2(netWorth),
     daysElapsedInMonth: daysElapsed,
+    rangeStart: start.toISOString(),
+    rangeEnd: end.toISOString(),
   };
 }
 
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
 export function computeGoalProgress(
-  txns: Array<{ amount: number; date: Date }>,
+  txns: Array<{ amount: number; date: Date; category?: string; isCreditCardPayment?: boolean }>,
   goalStart: Date,
   deadline: Date,
   now = new Date()
@@ -69,8 +79,10 @@ export function computeGoalProgress(
   txns.forEach((txn) => {
     const date = new Date(txn.date);
     if (date < goalStart || date > end) return;
-    if (txn.amount > 0) spent += txn.amount;
-    else income += Math.abs(txn.amount);
+    if (txn.amount > 0) {
+      if (shouldSkipSpend(txn)) return;
+      spent += txn.amount;
+    } else income += Math.abs(txn.amount);
   });
 
   return Math.max(0, Math.round((income - spent) * 100) / 100);

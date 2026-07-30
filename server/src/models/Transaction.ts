@@ -16,6 +16,12 @@ export interface ITransaction {
   /** plaid = synced; manual = user-created */
   source?: "plaid" | "manual";
   note?: string;
+  tags?: string[];
+  /** Credit card bill payment — exclude from spend to avoid double-count */
+  isCreditCardPayment?: boolean;
+  /** Relative path under uploads/ or data URL for small receipts */
+  receiptPath?: string;
+  receiptMime?: string;
   /** Split parent or replaced txn — skip in totals */
   excludedFromTotals?: boolean;
   splitFromId?: Types.ObjectId;
@@ -42,6 +48,10 @@ const TransactionSchema = new Schema<ITransactionDocument>(
     pending: Boolean,
     source: { type: String, enum: ["plaid", "manual"], default: "plaid" },
     note: String,
+    tags: { type: [String], default: [] },
+    isCreditCardPayment: { type: Boolean, default: false },
+    receiptPath: String,
+    receiptMime: String,
     excludedFromTotals: { type: Boolean, default: false },
     splitFromId: { type: Schema.Types.ObjectId, ref: "Transaction" },
   },

@@ -12,6 +12,10 @@ import categoryRoutes from "./routes/categories";
 import goalRoutes from "./routes/goals";
 import alertRoutes from "./routes/alerts";
 import accountRoutes from "./routes/accounts";
+import insightRoutes from "./routes/insights";
+import ruleRoutes from "./routes/rules";
+import path from "path";
+import fs from "fs";
 
 const app = express();
 
@@ -22,7 +26,11 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "6mb" }));
+
+const uploadsDir = path.join(__dirname, "..", "uploads");
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+app.use("/uploads", express.static(uploadsDir));
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -49,6 +57,8 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/goals", goalRoutes);
 app.use("/api/alerts", alertRoutes);
 app.use("/api/accounts", accountRoutes);
+app.use("/api/insights", insightRoutes);
+app.use("/api/rules", ruleRoutes);
 
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error("Unhandled API error", err);

@@ -27,37 +27,63 @@ router.get("/", auth, async (req, res) => {
     }
 
     const { start, end } = getMonthRange();
-    const [budgets, goals, monthTxns, allTxns] = await Promise.all([
+    const prevStart = new Date(start.getFullYear(), start.getMonth() - 1, 1);
+    const [budgets, goals, rangeTxns, allTxns] = await Promise.all([
       Budget.find({ userId: user._id }),
       Goal.find({ userId: user._id }),
-      Transaction.find({ userId: user._id, date: { $gte: start, $lt: end }, excludedFromTotals: { $ne: true } }),
-      Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select("amount date"),
+      Transaction.find({
+        userId: user._id,
+        date: { $gte: prevStart, $lt: end },
+        excludedFromTotals: { $ne: true },
+      }),
+      Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select(
+        "amount date userCategory suggestedCategory category isCreditCardPayment"
+      ),
     ]);
 
-    const spentByCategory = new Map<string, number>();
-    monthTxns.forEach((txn) => {
-      if (txn.amount <= 0) return;
+    const spentThis = new Map<string, number>();
+    const spentPrev = new Map<string, number>();
+    rangeTxns.forEach((txn) => {
+      if (txn.amount <= 0 || txn.isCreditCardPayment) return;
       const cat = effectiveCategory(txn);
-      spentByCategory.set(cat, (spentByCategory.get(cat) || 0) + txn.amount);
+      if (cat === "Transfers") return;
+      const d = new Date(txn.date);
+      if (d >= start && d < end) spentThis.set(cat, (spentThis.get(cat) || 0) + txn.amount);
+      else if (d >= prevStart && d < start) spentPrev.set(cat, (spentPrev.get(cat) || 0) + txn.amount);
     });
 
-    const budgetInputs = budgets.map((b) => ({
-      _id: b._id.toString(),
-      label: b.label,
-      category: b.category,
-      limit: b.limit,
-      spent: spentByCategory.get(b.category) || 0,
+    const budgetInputs = budgets.map((b) => {
+      const spent = spentThis.get(b.category) || 0;
+      const lastSpent = spentPrev.get(b.category) || 0;
+      const rollover = b.rolloverEnabled !== false ? Math.max(0, b.limit - lastSpent) : 0;
+      return {
+        _id: b._id.toString(),
+        label: b.label,
+        category: b.category,
+        limit: b.limit + rollover,
+        spent,
+      };
+    });
+
+    const mappedTxns = allTxns.map((t) => ({
+      amount: t.amount,
+      date: t.date,
+      category: effectiveCategory(t),
+      isCreditCardPayment: t.isCreditCardPayment,
     }));
 
-    const goalInputs = goals.map((g) => ({
-      _id: g._id.toString(),
-      title: g.title,
-      targetAmount: g.targetAmount,
-      deadline: g.deadline,
-      saved: computeGoalProgress(allTxns, g.createdAt, g.deadline),
-      completed: computeGoalProgress(allTxns, g.createdAt, g.deadline) >= g.targetAmount,
-      createdAt: g.createdAt,
-    }));
+    const goalInputs = goals.map((g) => {
+      const saved = computeGoalProgress(mappedTxns, g.createdAt, g.deadline);
+      return {
+        _id: g._id.toString(),
+        title: g.title,
+        targetAmount: g.targetAmount,
+        deadline: g.deadline,
+        saved,
+        completed: saved >= g.targetAmount,
+        createdAt: g.createdAt,
+      };
+    });
 
     const alerts = computeAlerts(budgetInputs, goalInputs, user.dismissedAlertKeys || []);
     res.json({ alerts });

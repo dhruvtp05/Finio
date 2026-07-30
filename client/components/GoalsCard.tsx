@@ -17,6 +17,8 @@ export default function GoalsCard({ goals, onUpdated }: { goals: GoalDto[]; onUp
   const [title, setTitle] = useState("");
   const [targetAmount, setTargetAmount] = useState("");
   const [deadline, setDeadline] = useState("");
+  const [contribAmounts, setContribAmounts] = useState<Record<string, string>>({});
+  const [savingContrib, setSavingContrib] = useState<string | null>(null);
 
   const addGoal = async () => {
     try {
@@ -43,6 +45,26 @@ export default function GoalsCard({ goals, onUpdated }: { goals: GoalDto[]; onUp
       onUpdated();
     } catch {
       toast.error("Failed to delete goal");
+    }
+  };
+
+  const addContribution = async (goalId: string) => {
+    const raw = contribAmounts[goalId];
+    const amount = Number(raw);
+    if (!(amount > 0)) {
+      toast.error("Enter an amount greater than 0");
+      return;
+    }
+    setSavingContrib(goalId);
+    try {
+      await api.post(`/api/goals/${goalId}/contributions`, { amount });
+      toast.success("Contribution added");
+      setContribAmounts((prev) => ({ ...prev, [goalId]: "" }));
+      onUpdated();
+    } catch {
+      toast.error("Failed to add contribution");
+    } finally {
+      setSavingContrib(null);
     }
   };
 
@@ -92,6 +114,38 @@ export default function GoalsCard({ goals, onUpdated }: { goals: GoalDto[]; onUp
                 Due {format(new Date(goal.deadline), "MMM d, yyyy")}
                 {goal.completed ? " · Completed" : ` · ${pct.toFixed(0)}%`}
               </p>
+              {(goal.fromCashFlow !== undefined || goal.fromContributions !== undefined) && (
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {goal.fromCashFlow !== undefined && (
+                    <span>Cash flow ${goal.fromCashFlow.toFixed(0)}</span>
+                  )}
+                  {goal.fromCashFlow !== undefined && goal.fromContributions !== undefined && " · "}
+                  {goal.fromContributions !== undefined && (
+                    <span>Contributions ${goal.fromContributions.toFixed(0)}</span>
+                  )}
+                </p>
+              )}
+              <div className="mt-2 flex gap-2">
+                <input
+                  className="finio-input w-28"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Amount"
+                  value={contribAmounts[goal._id] || ""}
+                  onChange={(e) =>
+                    setContribAmounts((prev) => ({ ...prev, [goal._id]: e.target.value }))
+                  }
+                />
+                <button
+                  type="button"
+                  className="finio-btn-secondary text-xs"
+                  disabled={savingContrib === goal._id}
+                  onClick={() => addContribution(goal._id)}
+                >
+                  {savingContrib === goal._id ? "..." : "Contribute"}
+                </button>
+              </div>
             </div>
           );
         })}

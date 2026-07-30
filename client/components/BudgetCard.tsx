@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import api from "@/lib/api";
 import { BudgetDto } from "@/lib/types";
 import { FINIO_CATEGORIES } from "@/lib/categories";
@@ -22,6 +22,7 @@ export default function BudgetCard({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftLimit, setDraftLimit] = useState("");
   const [draftLabel, setDraftLabel] = useState("");
+  const [draftRollover, setDraftRollover] = useState(true);
   const [adding, setAdding] = useState(false);
   const [newCategory, setNewCategory] = useState(FINIO_CATEGORIES[0]);
   const [newLabel, setNewLabel] = useState("");
@@ -34,6 +35,7 @@ export default function BudgetCard({
     setEditingId(budget._id);
     setDraftLimit(String(budget.limit));
     setDraftLabel(budget.label);
+    setDraftRollover(budget.rolloverEnabled !== false);
   };
 
   const saveEdit = async (id: string) => {
@@ -41,6 +43,7 @@ export default function BudgetCard({
       await api.put(`/api/budgets/${id}`, {
         label: draftLabel,
         limit: Number(draftLimit),
+        rolloverEnabled: draftRollover,
       });
       toast.success("Budget updated");
       setEditingId(null);
@@ -56,6 +59,7 @@ export default function BudgetCard({
         category: newCategory,
         label: newLabel || newCategory,
         limit: Number(newLimit),
+        rolloverEnabled: true,
       });
       toast.success("Budget added");
       setAdding(false);
@@ -81,7 +85,10 @@ export default function BudgetCard({
   return (
     <div className="finio-card h-full">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Budgets</h3>
+        <div>
+          <h3 className="text-lg font-semibold">Budgets</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Unused amount can roll into next month</p>
+        </div>
         <button type="button" onClick={() => setAdding((v) => !v)} className="text-sm text-indigo-600 hover:underline dark:text-indigo-400">
           {adding ? "Cancel" : "+ Add"}
         </button>
@@ -114,8 +121,10 @@ export default function BudgetCard({
 
       <div className="space-y-4">
         {budgets.map((budget) => {
-          const pct = budget.limit > 0 ? Math.min((budget.spent / budget.limit) * 100, 100) : 0;
+          const cap = budget.effectiveLimit ?? budget.limit;
+          const pct = cap > 0 ? Math.min((budget.spent / cap) * 100, 100) : 0;
           const isEditing = editingId === budget._id;
+          const rollover = budget.rolloverAmount || 0;
 
           return (
             <div key={budget._id}>
@@ -123,6 +132,10 @@ export default function BudgetCard({
                 <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
                   <input className="finio-input w-full" value={draftLabel} onChange={(e) => setDraftLabel(e.target.value)} />
                   <input className="finio-input w-full" type="number" value={draftLimit} onChange={(e) => setDraftLimit(e.target.value)} />
+                  <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                    <input type="checkbox" checked={draftRollover} onChange={(e) => setDraftRollover(e.target.checked)} />
+                    Roll over unused budget
+                  </label>
                   <div className="flex gap-2">
                     <button type="button" onClick={() => saveEdit(budget._id)} className="finio-btn-primary flex-1">
                       Save
@@ -140,13 +153,18 @@ export default function BudgetCard({
                     </button>
                     <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                       <span>
-                        ${budget.spent.toFixed(0)} / ${budget.limit}
+                        ${budget.spent.toFixed(0)} / ${cap.toFixed(0)}
                       </span>
                       <button type="button" onClick={() => deleteBudget(budget._id)} className="text-xs text-red-500">
                         ×
                       </button>
                     </div>
                   </div>
+                  {rollover > 0 && (
+                    <p className="mb-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                      +${rollover.toFixed(0)} rolled over from last month
+                    </p>
+                  )}
                   <div className="h-2.5 w-full rounded-full bg-slate-200 dark:bg-slate-700">
                     <div className={`h-2.5 rounded-full transition-all ${progressColor(pct)}`} style={{ width: `${pct}%` }} />
                   </div>
