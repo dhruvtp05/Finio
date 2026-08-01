@@ -1,4 +1,5 @@
 import { RecurringSubscription } from "./recurring";
+import { applyMoney } from "./txnMoney";
 
 export interface BillCalendarItem {
   merchantName: string;
@@ -19,6 +20,7 @@ export function buildBillCalendar(
   const items: BillCalendarItem[] = [];
 
   subscriptions.forEach((sub) => {
+    if (sub.category === "Income" || sub.category === "Transfers") return;
     let next = sub.nextExpectedDate ? new Date(sub.nextExpectedDate) : null;
     if (!next || Number.isNaN(next.getTime())) {
       next = new Date(sub.lastDate);
@@ -82,21 +84,17 @@ export function computeRunway(opts: {
 }): RunwayResult {
   const now = opts.now || new Date();
   const start = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-  let spend = 0;
-  let income = 0;
-  let days = Math.max(1, (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  const days = Math.max(1, (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+  const acc = { spent: 0, income: 0 };
 
   opts.txns.forEach((t) => {
-    if (t.excludedFromTotals) return;
     const d = new Date(t.date);
     if (d < start || d > now) return;
-    if (t.isCreditCardPayment || t.category === "Transfers" || t.category === "Income") {
-      if (t.amount < 0) income += Math.abs(t.amount);
-      return;
-    }
-    if (t.amount > 0) spend += t.amount;
-    else income += Math.abs(t.amount);
+    applyMoney(t, acc);
   });
+
+  const spend = Math.max(0, acc.spent);
+  const income = acc.income;
 
   const months = Math.max(days / 30.44, 0.5);
   const avgMonthlySpend = Math.round((spend / months) * 100) / 100;
@@ -105,12 +103,14 @@ export function computeRunway(opts: {
   const monthlyBurn = Math.max(avgMonthlySpend - avgMonthlyIncome, 0);
 
   const cancelled = new Set(opts.cancelledKeys || []);
-  const subs = opts.subscriptions.map((s) => ({
-    merchantKey: s.merchantKey,
-    merchantName: s.merchantName,
-    monthlyCost: monthlyCost(s),
-    yearlyCost: s.yearlyCost,
-  }));
+  const subs = opts.subscriptions
+    .filter((s) => s.category !== "Income" && s.category !== "Transfers")
+    .map((s) => ({
+      merchantKey: s.merchantKey,
+      merchantName: s.merchantName,
+      monthlyCost: monthlyCost(s),
+      yearlyCost: s.yearlyCost,
+    }));
 
   const cancelledMonthlySavings = Math.round(
     subs.filter((s) => cancelled.has(s.merchantKey)).reduce((a, s) => a + s.monthlyCost, 0) * 100
@@ -153,15 +153,16 @@ export function buildHeatmap(
   const byMerchant = new Map<string, number>();
 
   txns.forEach((t) => {
-    if (t.excludedFromTotals || t.amount <= 0) return;
-    if (t.isCreditCardPayment || t.category === "Transfers") return;
     const d = new Date(t.date);
     if (d < start || d > now) return;
+    const period = { spent: 0, income: 0 };
+    applyMoney(t, period);
+    if (period.spent <= 0) return;
     const dow = d.getDay();
-    byDow[dow].spent += t.amount;
+    byDow[dow].spent += period.spent;
     byDow[dow].count += 1;
     const m = (t.merchantName || t.name || "Unknown").trim();
-    byMerchant.set(m, (byMerchant.get(m) || 0) + t.amount);
+    byMerchant.set(m, (byMerchant.get(m) || 0) + period.spent);
   });
 
   const merchants = Array.from(byMerchant.entries())

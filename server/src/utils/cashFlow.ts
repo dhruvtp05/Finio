@@ -1,3 +1,5 @@
+import { applyMoney } from "./txnMoney";
+
 export interface CashFlowMetrics {
   moneyInThisMonth: number;
   moneyOutThisMonth: number;
@@ -14,12 +16,8 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-function shouldSkipSpend(txn: { category?: string; isCreditCardPayment?: boolean }) {
-  return Boolean(txn.isCreditCardPayment || txn.category === "Transfers" || txn.category === "Income");
-}
-
 export function computeCashFlowMetrics(
-  txns: Array<{ amount: number; date: Date; category?: string; isCreditCardPayment?: boolean }>,
+  txns: Array<{ amount: number; date: Date; category?: string; isCreditCardPayment?: boolean; excludedFromTotals?: boolean }>,
   opts?: { start?: Date; end?: Date; now?: Date }
 ): CashFlowMetrics {
   const now = opts?.now || new Date();
@@ -29,33 +27,28 @@ export function computeCashFlowMetrics(
 
   let moneyInThisMonth = 0;
   let moneyOutThisMonth = 0;
-  let totalIncome = 0;
-  let totalSpent = 0;
+  const allTime = { spent: 0, income: 0 };
 
   txns.forEach((txn) => {
     const date = new Date(txn.date);
     const inRange = date >= start && date < end;
-
-    if (txn.amount > 0) {
-      if (shouldSkipSpend(txn)) return;
-      totalSpent += txn.amount;
-      if (inRange) moneyOutThisMonth += txn.amount;
-    } else {
-      const income = Math.abs(txn.amount);
-      totalIncome += income;
-      if (inRange) moneyInThisMonth += income;
+    const before = { spent: allTime.spent, income: allTime.income };
+    applyMoney(txn, allTime);
+    if (inRange) {
+      moneyOutThisMonth += allTime.spent - before.spent;
+      moneyInThisMonth += allTime.income - before.income;
     }
   });
 
   const netThisMonth = moneyInThisMonth - moneyOutThisMonth;
   const savingsRatePercent =
     moneyInThisMonth > 0 ? Math.round((netThisMonth / moneyInThisMonth) * 1000) / 10 : null;
-  const avgDailySpend = moneyOutThisMonth / daysElapsed;
-  const netWorth = totalIncome - totalSpent;
+  const avgDailySpend = Math.max(0, moneyOutThisMonth) / daysElapsed;
+  const netWorth = allTime.income - allTime.spent;
 
   return {
     moneyInThisMonth: round2(moneyInThisMonth),
-    moneyOutThisMonth: round2(moneyOutThisMonth),
+    moneyOutThisMonth: round2(Math.max(0, moneyOutThisMonth)),
     netThisMonth: round2(netThisMonth),
     savingsRatePercent,
     avgDailySpend: round2(avgDailySpend),
@@ -67,23 +60,19 @@ export function computeCashFlowMetrics(
 }
 
 export function computeGoalProgress(
-  txns: Array<{ amount: number; date: Date; category?: string; isCreditCardPayment?: boolean }>,
+  txns: Array<{ amount: number; date: Date; category?: string; isCreditCardPayment?: boolean; excludedFromTotals?: boolean }>,
   goalStart: Date,
   deadline: Date,
   now = new Date()
 ): number {
   const end = now < deadline ? now : deadline;
-  let income = 0;
-  let spent = 0;
+  const acc = { spent: 0, income: 0 };
 
   txns.forEach((txn) => {
     const date = new Date(txn.date);
     if (date < goalStart || date > end) return;
-    if (txn.amount > 0) {
-      if (shouldSkipSpend(txn)) return;
-      spent += txn.amount;
-    } else income += Math.abs(txn.amount);
+    applyMoney(txn, acc);
   });
 
-  return Math.max(0, Math.round((income - spent) * 100) / 100);
+  return Math.max(0, Math.round((acc.income - acc.spent) * 100) / 100);
 }

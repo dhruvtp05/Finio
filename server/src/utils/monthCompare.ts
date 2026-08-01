@@ -1,3 +1,5 @@
+import { applyMoney } from "./txnMoney";
+
 export interface MonthPeriodMetrics {
   key: string;
   label: string;
@@ -52,45 +54,52 @@ function rangeFor(y: number, m: number) {
 }
 
 function metricsForPeriod(
-  txns: Array<{ amount: number; date: Date; category: string; excludedFromTotals?: boolean }>,
+  txns: Array<{
+    amount: number;
+    date: Date;
+    category: string;
+    excludedFromTotals?: boolean;
+    isCreditCardPayment?: boolean;
+  }>,
   y: number,
   m: number
 ): MonthPeriodMetrics {
   const { start, end } = rangeFor(y, m);
-  let spent = 0;
-  let income = 0;
+  const acc = { spent: 0, income: 0 };
   const categoryMap = new Map<string, number>();
 
   txns.forEach((txn) => {
-    if (txn.excludedFromTotals) return;
-    if (txn.category === "Transfers") return;
     const date = new Date(txn.date);
     if (date < start || date >= end) return;
-    if (txn.amount > 0) {
-      spent += txn.amount;
-      categoryMap.set(txn.category, (categoryMap.get(txn.category) || 0) + txn.amount);
-    } else {
-      income += Math.abs(txn.amount);
-    }
+    applyMoney(txn, acc, (category, delta) => {
+      categoryMap.set(category, (categoryMap.get(category) || 0) + delta);
+    });
   });
 
   const byCategory = Array.from(categoryMap.entries())
     .map(([category, total]) => ({ category, total: round2(total) }))
+    .filter((c) => c.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, 5);
 
   return {
     key: monthKey(y, m),
     label: monthLabel(y, m),
-    spent: round2(spent),
-    income: round2(income),
-    net: round2(income - spent),
+    spent: round2(Math.max(0, acc.spent)),
+    income: round2(acc.income),
+    net: round2(acc.income - acc.spent),
     byCategory,
   };
 }
 
 export function computeMonthCompare(
-  txns: Array<{ amount: number; date: Date; category: string; excludedFromTotals?: boolean }>,
+  txns: Array<{
+    amount: number;
+    date: Date;
+    category: string;
+    excludedFromTotals?: boolean;
+    isCreditCardPayment?: boolean;
+  }>,
   now = new Date()
 ): MonthCompareResult {
   const y = now.getFullYear();

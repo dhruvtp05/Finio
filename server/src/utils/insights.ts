@@ -1,5 +1,6 @@
 import { effectiveCategory } from "../services/categorization";
 import { ITransactionDocument } from "../models/Transaction";
+import { applyMoney } from "./txnMoney";
 
 function startOfWeek(d: Date) {
   const x = new Date(d);
@@ -21,18 +22,21 @@ function round2(n: number) {
 }
 
 function sumSpend(txns: ITransactionDocument[], start: Date, end: Date) {
-  let spent = 0;
-  let income = 0;
+  const acc = { spent: 0, income: 0 };
   txns.forEach((t) => {
-    if (t.excludedFromTotals) return;
     const date = new Date(t.date);
     if (date < start || date >= end) return;
-    const cat = effectiveCategory(t);
-    if (cat === "Transfers") return;
-    if (t.amount > 0) spent += t.amount;
-    else income += Math.abs(t.amount);
+    applyMoney(
+      {
+        amount: t.amount,
+        category: effectiveCategory(t),
+        isCreditCardPayment: t.isCreditCardPayment,
+        excludedFromTotals: t.excludedFromTotals,
+      },
+      acc
+    );
   });
-  return { spent: round2(spent), income: round2(income) };
+  return { spent: round2(acc.spent), income: round2(acc.income) };
 }
 
 export interface WeeklyDigest {
@@ -61,16 +65,27 @@ export function buildWeeklyDigest(
 
   const merchantMap = new Map<string, number>();
   txns.forEach((t) => {
-    if (t.excludedFromTotals || t.amount <= 0) return;
     const date = new Date(t.date);
     if (date < weekStart || date >= weekEnd) return;
-    if (effectiveCategory(t) === "Transfers") return;
+    const cat = effectiveCategory(t);
+    const acc = { spent: 0, income: 0 };
+    applyMoney(
+      {
+        amount: t.amount,
+        category: cat,
+        isCreditCardPayment: t.isCreditCardPayment,
+        excludedFromTotals: t.excludedFromTotals,
+      },
+      acc
+    );
+    if (acc.spent === 0) return;
     const name = (t.merchantName || t.name || "Unknown").trim();
-    merchantMap.set(name, (merchantMap.get(name) || 0) + t.amount);
+    merchantMap.set(name, (merchantMap.get(name) || 0) + acc.spent);
   });
 
   const topMerchants = Array.from(merchantMap.entries())
     .map(([name, total]) => ({ name, total: round2(total) }))
+    .filter((m) => m.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, 5);
 
@@ -134,11 +149,21 @@ export function buildMerchantInsights(
   const byKey = new Map<string, { name: string; total: number; count: number; last: Date; category: string }>();
 
   txns.forEach((t) => {
-    if (t.excludedFromTotals || t.amount <= 0) return;
     const date = new Date(t.date);
     if (year && date.getFullYear() !== year) return;
     const cat = effectiveCategory(t);
-    if (cat === "Transfers") return;
+    const acc = { spent: 0, income: 0 };
+    applyMoney(
+      {
+        amount: t.amount,
+        category: cat,
+        isCreditCardPayment: t.isCreditCardPayment,
+        excludedFromTotals: t.excludedFromTotals,
+      },
+      acc
+    );
+    if (acc.spent === 0) return;
+
     const display = (t.merchantName || t.name || "Unknown").trim();
     const key = normalizeMerchant(display);
     if (!key) return;
@@ -146,10 +171,10 @@ export function buildMerchantInsights(
 
     const existing = byKey.get(key);
     if (!existing) {
-      byKey.set(key, { name: display, total: t.amount, count: 1, last: date, category: cat });
+      byKey.set(key, { name: display, total: acc.spent, count: acc.spent > 0 ? 1 : 0, last: date, category: cat });
     } else {
-      existing.total += t.amount;
-      existing.count += 1;
+      existing.total += acc.spent;
+      if (acc.spent > 0) existing.count += 1;
       if (date > existing.last) {
         existing.last = date;
         existing.name = display;
@@ -167,6 +192,7 @@ export function buildMerchantInsights(
       lastDate: v.last.toISOString(),
       category: v.category,
     }))
+    .filter((m) => m.total > 0)
     .sort((a, b) => b.total - a.total)
     .slice(0, limit);
 }
@@ -180,18 +206,29 @@ export function buildTaxExportRows(
   const map = new Map<string, { total: number; count: number }>();
 
   txns.forEach((t) => {
-    if (t.excludedFromTotals || t.amount <= 0) return;
     const date = new Date(t.date);
     if (date < start || date >= end) return;
     const cat = effectiveCategory(t);
-    if (cat === "Transfers" || cat === "Income") return;
-    const cur = map.get(cat) || { total: 0, count: 0 };
-    cur.total += t.amount;
-    cur.count += 1;
-    map.set(cat, cur);
+    const acc = { spent: 0, income: 0 };
+    applyMoney(
+      {
+        amount: t.amount,
+        category: cat,
+        isCreditCardPayment: t.isCreditCardPayment,
+        excludedFromTotals: t.excludedFromTotals,
+      },
+      acc,
+      (category, delta) => {
+        const cur = map.get(category) || { total: 0, count: 0 };
+        cur.total += delta;
+        if (delta > 0) cur.count += 1;
+        map.set(category, cur);
+      }
+    );
   });
 
   return Array.from(map.entries())
     .map(([category, v]) => ({ category, total: round2(v.total), count: v.count }))
+    .filter((r) => r.total > 0)
     .sort((a, b) => b.total - a.total);
 }

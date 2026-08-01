@@ -46,7 +46,7 @@ router.get("/", auth, async (req, res) => {
     rangeTxns.forEach((txn) => {
       if (txn.amount <= 0 || txn.isCreditCardPayment) return;
       const cat = effectiveCategory(txn);
-      if (cat === "Transfers") return;
+      if (cat === "Transfers" || cat === "Income") return;
       const d = new Date(txn.date);
       if (d >= start && d < end) spentThis.set(cat, (spentThis.get(cat) || 0) + txn.amount);
       else if (d >= prevStart && d < start) spentPrev.set(cat, (spentPrev.get(cat) || 0) + txn.amount);

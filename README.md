@@ -17,9 +17,10 @@
 ### Core
 * **Google Sign-In** — NextAuth OAuth (no passwords).
 * **Plaid bank sync** — Link sandbox banks, sync transactions (webhooks + manual refresh), encrypted access tokens at rest.
-* **Cash flow dashboard** — Money in/out, savings rate, avg daily spend; optional custom date range. Transfers and credit-card payments are excluded from spend so rates stay sane.
+* **Cash flow dashboard** — Money in/out, savings rate, avg daily spend; optional custom date range. **Transfers**, **credit-card payments**, and the **Income** category are excluded from spend; merchant refunds (negative non-income amounts) net against spend instead of inflating income.
 * **Budgets** — Category limits with progress bars and **month-to-month rollover** of unused budget.
 * **Savings goals** — Targets with progress from cash flow **plus manual contributions**.
+* **Alerts** — Dashboard banner for over-budget / nearing limit, goal deadlines, and behind-pace; dismissible per alert.
 * **Spending charts** — Daily / weekly / monthly / yearly timeline (spent vs income).
 * **Dark mode** — Persisted in local storage.
 * **CSV export** — Filtered transactions or **tax-year category summary**.
@@ -43,6 +44,7 @@
 ### Settings
 * Reconnect / disconnect Plaid.
 * Category rules CRUD + “Apply all”.
+* Re-categorize all transactions to Finio’s standard categories.
 * Email weekly digest (requires SMTP — see below).
 
 ---

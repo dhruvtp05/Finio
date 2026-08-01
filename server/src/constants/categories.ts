@@ -68,7 +68,7 @@ const PLAID_CATEGORY_MAP: Record<string, FinioCategory> = {
   transfer: "Transfers",
   "bank fees": "Fees & Charges",
   "service charge": "Fees & Charges",
-  interest: "Fees & Charges",
+  overdraft: "Fees & Charges",
   "interest income": "Income",
   payroll: "Income",
   deposit: "Income",
@@ -87,7 +87,7 @@ const KEYWORD_RULES: Array<{ keywords: string[]; category: FinioCategory }> = [
   { keywords: ["cvs", "walgreens", "pharmacy", "doctor", "hospital", "dental", "clinic"], category: "Healthcare" },
   { keywords: ["airline", "hotel", "airbnb", "expedia", "delta", "united", "marriott"], category: "Travel" },
   { keywords: ["rent", "mortgage", "landlord", "zillow"], category: "Rent & Housing" },
-  { keywords: ["salary", "payroll", "direct dep", "paycheck"], category: "Income" },
+  { keywords: ["salary", "payroll", "direct dep", "paycheck", "intrst", "interest payment", "interest pymnt"], category: "Income" },
   { keywords: ["transfer", "venmo", "zelle", "paypal transfer"], category: "Transfers" },
   { keywords: ["tuition", "coursera", "udemy", "college"], category: "Education" },
   { keywords: ["gym", "salon", "barber", "spa"], category: "Personal Care" },
@@ -113,12 +113,21 @@ export function normalizeToFinioCategory(
   name?: string | null,
   plaidCategories?: string[] | null
 ): FinioCategory {
+  const haystack = `${merchantName || ""} ${name || ""}`.toLowerCase();
+
+  // Income keywords win over generic Plaid "Transfer" (e.g. INTRST PYMNT)
+  for (const rule of KEYWORD_RULES) {
+    if (rule.category !== "Income") continue;
+    if (rule.keywords.some((keyword) => haystack.includes(keyword))) {
+      return rule.category;
+    }
+  }
+
   for (const raw of plaidCategories ?? []) {
     const mapped = mapPlaidCategory(raw);
     if (mapped) return mapped;
   }
 
-  const haystack = `${merchantName || ""} ${name || ""}`.toLowerCase();
   for (const rule of KEYWORD_RULES) {
     if (rule.keywords.some((keyword) => haystack.includes(keyword))) {
       return rule.category;
@@ -137,8 +146,10 @@ export function effectiveCategory(txn: {
   category?: string[];
   userCategory?: string;
   suggestedCategory?: string;
+  merchantName?: string | null;
+  name?: string | null;
 }): FinioCategory {
   if (txn.userCategory && isFinioCategory(txn.userCategory)) return txn.userCategory;
   if (txn.suggestedCategory && isFinioCategory(txn.suggestedCategory)) return txn.suggestedCategory as FinioCategory;
-  return normalizeToFinioCategory(null, null, txn.category);
+  return normalizeToFinioCategory(txn.merchantName, txn.name, txn.category);
 }

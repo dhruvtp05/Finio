@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Finio">
+  <rect width="64" height="64" rx="14" fill="#4F46E5"/>
+  <!-- Stylized F with a rising chart cut into the crossbar -->
+  <path
+    fill="#FFFFFF"
+    d="M17 13h30v7.5H25.5V27h9.2l3.3-4.1 3.8 3.2 5.2-6.6 4.2 3.3-8.2 10.4-3.9-3.3-3.4 4.2H25.5V51H17V13z"
+  />
+</svg>

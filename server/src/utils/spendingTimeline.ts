@@ -1,3 +1,5 @@
+import { applyMoney } from "./txnMoney";
+
 export type SpendingGroupBy = "day" | "week" | "month" | "year";
 
 export type SpendingTimelinePoint = {
@@ -7,7 +9,13 @@ export type SpendingTimelinePoint = {
   income: number;
 };
 
-type TxnLike = { date: Date; amount: number };
+type TxnLike = {
+  date: Date;
+  amount: number;
+  category?: string;
+  isCreditCardPayment?: boolean;
+  excludedFromTotals?: boolean;
+};
 
 const LIMITS: Record<SpendingGroupBy, number> = {
   day: 30,
@@ -107,8 +115,7 @@ export function buildSpendingTimeline(
   txns.forEach((txn) => {
     const key = bucketKey(new Date(txn.date), groupBy);
     const current = map.get(key) || { spent: 0, income: 0 };
-    if (txn.amount > 0) current.spent += txn.amount;
-    else current.income += Math.abs(txn.amount);
+    applyMoney(txn, current);
     map.set(key, current);
   });
 
@@ -120,7 +127,7 @@ export function buildSpendingTimeline(
     .map(([key, totals]) => ({
       key,
       label: formatLabel(key, groupBy),
-      spent: totals.spent,
+      spent: Math.max(0, totals.spent),
       income: totals.income,
     }));
 }

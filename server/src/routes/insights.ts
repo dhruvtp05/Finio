@@ -38,7 +38,7 @@ function spentByCategory(
     const date = new Date(txn.date);
     if (date < start || date >= end) return;
     const cat = effectiveCategory(txn as Parameters<typeof effectiveCategory>[0]);
-    if (cat === "Transfers") return;
+    if (cat === "Transfers" || cat === "Income") return;
     map.set(cat, (map.get(cat) || 0) + txn.amount);
   });
   return map;

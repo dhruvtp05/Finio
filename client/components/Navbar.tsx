@@ -41,8 +41,10 @@ export default function Navbar() {
   return (
     <nav className="finio-card relative mb-6">
       <div className="flex items-center justify-between gap-3">
-        <Link href="/dashboard" className="text-xl font-bold text-indigo-600 dark:text-indigo-400">
-          Finio
+        <Link href="/dashboard" className="flex items-center gap-2 text-xl font-bold text-indigo-600 dark:text-indigo-400">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/finio-logo.png" alt="" width={28} height={28} className="h-7 w-7 rounded-[7px]" />
+          <span>Finio</span>
         </Link>
 
         {/* Desktop links */}

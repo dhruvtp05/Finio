@@ -14,16 +14,25 @@ function getMonthRange(offsetMonths = 0, date = new Date()) {
 }
 
 function spentMapForRange(
-  txns: Array<{ amount: number; date: Date; excludedFromTotals?: boolean; userCategory?: string; suggestedCategory?: string; category?: string[] }>,
+  txns: Array<{
+    amount: number;
+    date: Date;
+    excludedFromTotals?: boolean;
+    userCategory?: string;
+    suggestedCategory?: string;
+    category?: string[];
+    isCreditCardPayment?: boolean;
+  }>,
   start: Date,
   end: Date
 ) {
   const map = new Map<string, number>();
   txns.forEach((txn) => {
-    if (txn.excludedFromTotals || txn.amount <= 0) return;
+    if (txn.excludedFromTotals || txn.amount <= 0 || txn.isCreditCardPayment) return;
     const d = new Date(txn.date);
     if (d < start || d >= end) return;
     const cat = effectiveCategory(txn as Parameters<typeof effectiveCategory>[0]);
+    if (cat === "Transfers" || cat === "Income") return;
     map.set(cat, (map.get(cat) || 0) + txn.amount);
   });
   return map;

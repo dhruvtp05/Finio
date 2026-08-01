@@ -136,7 +136,10 @@ export function detectRecurringSubscriptions(
   const rawGroups = new Map<string, ITransactionDocument[]>();
 
   txns.forEach((txn) => {
-    if (txn.amount <= 0 || txn.pending || txn.excludedFromTotals) return;
+    if (txn.pending || txn.excludedFromTotals || txn.isCreditCardPayment) return;
+    const cat = effectiveCategory(txn);
+    if (cat === "Income" || cat === "Transfers") return;
+    // Keep charges and refunds so we can drop net-zero sandbox pairs (e.g. United +/- $500)
     const key = normalizeMerchantKey(txn);
     if (!key || key.length < 2) return;
     const list = rawGroups.get(key) || [];
@@ -157,22 +160,24 @@ export function detectRecurringSubscriptions(
   const results: RecurringSubscription[] = [];
 
   byMerchant.forEach((group, merchantKey) => {
-    const minCount = 2;
-    if (group.length < minCount) return;
+    const charges = group.filter((t) => t.amount > 0);
+    const net = group.reduce((s, t) => s + t.amount, 0);
+    // Refunds cancel the charges → not a real subscription
+    if (charges.length < 2 || net <= 0) return;
 
-    const amounts = group.map((t) => t.amount);
+    const amounts = charges.map((t) => t.amount);
     if (!amountsSimilar(amounts)) return;
 
-    const dates = group.map((t) => new Date(t.date));
+    const dates = charges.map((t) => new Date(t.date));
     const monthsActive = distinctMonths(dates);
 
-    const cadence = detectCadence(dates, monthsActive, group.length);
+    const cadence = detectCadence(dates, monthsActive, charges.length);
     if (!cadence) return;
 
     // Annual can have 2 charges across years; monthly/weekly need 2+ months
     if (cadence !== "annual" && monthsActive < 2) return;
 
-    const sorted = [...group].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const sorted = [...charges].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     const displayName = sorted[0].merchantName || sorted[0].name || merchantKey;
     const avgAmount = amounts.reduce((s, a) => s + a, 0) / amounts.length;
     const avg = Math.round(avgAmount * 100) / 100;
@@ -184,7 +189,7 @@ export function detectRecurringSubscriptions(
       category: effectiveCategory(sorted[0]),
       avgAmount: avg,
       cadence,
-      occurrenceCount: group.length,
+      occurrenceCount: charges.length,
       lastDate: last.toISOString(),
       monthsActive,
       yearlyCost: yearlyFromCadence(avg, cadence),

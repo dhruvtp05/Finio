@@ -11,6 +11,7 @@ import { computeCashFlowMetrics } from "../utils/cashFlow";
 import { computeMonthCompare } from "../utils/monthCompare";
 import { computeNetWorthFromAccounts } from "../utils/netWorth";
 import { buildTaxExportRows } from "../utils/insights";
+import { applyMoney } from "../utils/txnMoney";
 
 const router = Router();
 
@@ -185,6 +186,7 @@ router.get("/compare", auth, async (req, res) => {
       date: t.date,
       category: effectiveCategory(t),
       excludedFromTotals: t.excludedFromTotals,
+      isCreditCardPayment: t.isCreditCardPayment,
     }));
     return res.json(computeMonthCompare(mapped));
   } catch (error) {
@@ -207,8 +209,17 @@ router.get("/spending-timeline", auth, async (req, res) => {
       return res.json({ groupBy: groupByParam, data: [] });
     }
 
-    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select("date amount");
-    const data = buildSpendingTimeline(txns, groupByParam, limit);
+    const txns = await Transaction.find({ userId: user._id, excludedFromTotals: { $ne: true } }).select(
+      "date amount userCategory suggestedCategory category isCreditCardPayment"
+    );
+    const mapped = txns.map((t) => ({
+      date: t.date,
+      amount: t.amount,
+      category: effectiveCategory(t),
+      isCreditCardPayment: t.isCreditCardPayment,
+      excludedFromTotals: t.excludedFromTotals,
+    }));
+    const data = buildSpendingTimeline(mapped, groupByParam, limit);
 
     return res.json({ groupBy: groupByParam, data });
   } catch (error) {
@@ -319,23 +330,37 @@ router.get("/summary", auth, async (req, res) => {
       const date = new Date(txn.date);
       const month = monthKey(date);
       const inCurrentMonth = date >= start && date < end;
-      const skipSpend = txn.isCreditCardPayment || category === "Transfers";
-
-      if (txn.amount > 0) {
-        if (!skipSpend) {
-          totalSpent += txn.amount;
-          if (inCurrentMonth) totalSpentThisMonth += txn.amount;
-          categoryMap.set(category, (categoryMap.get(category) || 0) + txn.amount);
+      const before = { spent: totalSpent, income: totalIncome };
+      const acc = { spent: totalSpent, income: totalIncome };
+      applyMoney(
+        {
+          amount: txn.amount,
+          category,
+          isCreditCardPayment: txn.isCreditCardPayment,
+          excludedFromTotals: txn.excludedFromTotals,
+        },
+        acc,
+        (cat, delta) => {
+          if (delta > 0) categoryMap.set(cat, (categoryMap.get(cat) || 0) + delta);
         }
-      } else {
-        const income = Math.abs(txn.amount);
-        totalIncome += income;
-        if (inCurrentMonth) totalIncomeThisMonth += income;
+      );
+      totalSpent = acc.spent;
+      totalIncome = acc.income;
+      if (inCurrentMonth) {
+        totalSpentThisMonth += acc.spent - before.spent;
+        totalIncomeThisMonth += acc.income - before.income;
       }
 
       const current = monthMap.get(month) || { month, spent: 0, income: 0 };
-      if (txn.amount > 0 && !skipSpend) current.spent += txn.amount;
-      else if (txn.amount < 0) current.income += Math.abs(txn.amount);
+      applyMoney(
+        {
+          amount: txn.amount,
+          category,
+          isCreditCardPayment: txn.isCreditCardPayment,
+          excludedFromTotals: txn.excludedFromTotals,
+        },
+        current
+      );
       monthMap.set(month, current);
     });
 
@@ -343,12 +368,14 @@ router.get("/summary", auth, async (req, res) => {
       .map(([category, total]) => ({ category, total }))
       .sort((a, b) => b.total - a.total);
 
-    const byMonth = Array.from(monthMap.values()).sort((a, b) => a.month.localeCompare(b.month));
+    const byMonth = Array.from(monthMap.values())
+      .map((m) => ({ ...m, spent: Math.max(0, m.spent) }))
+      .sort((a, b) => a.month.localeCompare(b.month));
 
     return res.json({
-      totalSpent,
+      totalSpent: Math.max(0, totalSpent),
       totalIncome,
-      totalSpentThisMonth,
+      totalSpentThisMonth: Math.max(0, totalSpentThisMonth),
       totalIncomeThisMonth,
       byCategory,
       byMonth,
