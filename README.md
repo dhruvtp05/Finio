@@ -167,7 +167,7 @@ Architecture details: **[SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md)**.
 
 ---
 
-## Deploy (when you have a domain)
+## Deploy
 
 * **Client:** Vercel — set env vars; Google redirect = `https://your-domain/api/auth/callback/google`.
 * **Server:** Render/Railway — match `NEXTAUTH_SECRET`, set `CLIENT_URL` to the frontend origin, register Plaid webhook URL.
